@@ -230,7 +230,7 @@ nav.subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
         <select id="sleeperLeagueSelect"></select>
       </div>
     </div>
-    <div class="small-muted" style="margin-top:8px">Pulls your real roster straight from Sleeper\'s public API (no login needed) and runs it through this site\'s own matchup/projection engine. <b>Experimental / prototype</b> \u2014 fantasy points are estimated from PTS/REB/AST/STL/BLK/TOV/3PM only (FG/FT makes-attempts and double-double/triple-double/big-game bonus categories are not modeled yet), so treat exact numbers as directional, not final.</div>
+    <div class="small-muted" style="margin-top:8px">Pulls your real roster straight from Sleeper's public API (no login needed) and runs it through this site's own matchup/projection engine, including your league's real scoring settings (DD/TD and other bonus thresholds included). <b>Experimental / prototype</b> — treat the numbers as directional, not final.</div>
   </div>
   <div id="sleeperOut"></div>
 </section>
@@ -1278,17 +1278,70 @@ document.getElementById('methodologyOut').innerHTML = `
     return data;
   }
 
+  // Standard normal CDF via Abramowitz-Stegun erf approximation (no external lib needed).
+  function normCdf(x){
+    const t = 1/(1+0.2316419*Math.abs(x));
+    const d = 0.3989423*Math.exp(-x*x/2);
+    let p = d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));
+    if (x > 0) p = 1 - p;
+    return p;
+  }
+  // P(stat >= threshold), modeling the stat as ~Normal(mean, std) with a continuity correction.
+  // std is assumed as a coefficient-of-variation of the projected mean — real per-game NBA box-score
+  // variance is roughly in this range, but this is a modeled approximation, not sourced from real
+  // game logs (this tool doesn't have real per-game variance data, only per-game averages).
+  const STAT_CV = {pts:0.33, trb:0.32, ast:0.38, stl:0.55, blk:0.60};
+  function probAtLeast(statKey, mean, threshold){
+    if (mean <= 0) return 0;
+    const cv = STAT_CV[statKey] || 0.4;
+    const std = Math.max(1.0, mean*cv);
+    return 1 - normCdf((threshold - 0.5 - mean) / std);
+  }
+
   function fantasyPts(scoring, proj){
-    // Approximate — only categories we can reliably compute from this tool's per-game model.
-    let total = 0;
-    total += (proj.pts||0) * (scoring.pts||0);
-    total += (proj.trb||0) * (scoring.reb||0);
-    total += (proj.ast||0) * (scoring.ast||0);
-    total += (proj.stl||0) * (scoring.stl||0);
-    total += (proj.blk||0) * (scoring.blk||0);
-    total += (proj.tov||0) * (scoring.to||0);
-    total += (proj.tpm||0) * (scoring.tpm||0);
-    return total;
+    // Core counting-stat categories — these are direct, not probabilistic.
+    let core = 0;
+    core += (proj.pts||0) * (scoring.pts||0);
+    core += (proj.trb||0) * (scoring.reb||0);
+    core += (proj.ast||0) * (scoring.ast||0);
+    core += (proj.stl||0) * (scoring.stl||0);
+    core += (proj.blk||0) * (scoring.blk||0);
+    core += (proj.tov||0) * (scoring.to||0);
+    core += (proj.tpm||0) * (scoring.tpm||0);
+
+    // Bonus/threshold categories — these are single-game, all-or-nothing events (did you hit 10+ in
+    // two categories tonight?), so a per-game AVERAGE can't trigger them directly. Instead this models
+    // each as an expected value: P(crossing the threshold tonight) × the bonus payout, using the
+    // normal approximation above. This is an estimate layered on top of the real per-game baseline,
+    // not a guarantee — a player projected for 24/9/4 is very likely but not certain to double-double.
+    let bonus = 0;
+    const cats = ['pts','trb','ast','stl','blk'];
+    const statVal = {pts:proj.pts, trb:proj.trb, ast:proj.ast, stl:proj.stl, blk:proj.blk};
+    const p10 = {};
+    cats.forEach(c => { p10[c] = probAtLeast(c, statVal[c]||0, 10); });
+    // P(exactly k of 5 categories hit double digits), assuming independence between categories
+    // (a simplification — real stats correlate somewhat, e.g. more minutes lifts several at once —
+    // so this is an approximation, not an exact joint probability).
+    let dist = [1,0,0,0,0,0]; // dist[k] = P(exactly k categories >=10), built incrementally
+    cats.forEach(c => {
+      const p = p10[c];
+      const next = [0,0,0,0,0,0];
+      for (let k=0;k<=5;k++){
+        next[k] += dist[k]*(1-p);
+        if (k+1<=5) next[k+1] += dist[k]*p;
+      }
+      dist = next;
+    });
+    const pExactly2 = dist[2];
+    const pAtLeast3 = dist[3]+dist[4]+dist[5];
+    bonus += (scoring.dd||0) * pExactly2;      // double-double bonus (not also a triple-double)
+    bonus += (scoring.td||0) * pAtLeast3;      // triple-double bonus
+    bonus += (scoring.bonus_pt_40p||0) * probAtLeast('pts', proj.pts||0, 40);
+    bonus += (scoring.bonus_pt_50p||0) * probAtLeast('pts', proj.pts||0, 50);
+    bonus += (scoring.bonus_ast_15p||0) * probAtLeast('ast', proj.ast||0, 15);
+    bonus += (scoring.bonus_reb_20p||0) * probAtLeast('trb', proj.trb||0, 20);
+
+    return {total: core+bonus, core, bonus};
   }
 
   function nextGamesForTeam(teamAbbr, n){
@@ -1361,19 +1414,19 @@ document.getElementById('methodologyOut').innerHTML = `
       const name = sp ? sp.full_name : ('Sleeper #'+pid);
       const local = sp ? findLocalPlayer(sp.full_name) : null;
       const isStarter = starterIds.has(pid);
-      let nextGame = null, proj = null, fpts = null;
+      let nextGame = null, proj = null, fptsObj = null;
       if (local) {
         const games = nextGamesForTeam(local.t, 1);
         if (games.length) {
           nextGame = games[0];
           proj = computeProjection(local, nextGame, local.t);
-          if (proj) fpts = fantasyPts(scoring, proj);
+          if (proj) fptsObj = fantasyPts(scoring, proj);
         }
       }
-      return {pid, name, sp, local, isStarter, nextGame, proj, fpts};
+      return {pid, name, sp, local, isStarter, nextGame, proj, fptsObj};
     });
 
-    rows.sort((a,b) => (b.fpts||-999) - (a.fpts||-999));
+    rows.sort((a,b) => (b.fptsObj?.total ?? -999) - (a.fptsObj?.total ?? -999));
 
     const fmtRow = r => `<tr>
       <td class="name-cell">${r.local ? `<a class="player-link" data-pid="${r.local.id}">${r.name}</a>` : r.name}
@@ -1386,17 +1439,18 @@ document.getElementById('methodologyOut').innerHTML = `
       <td>${r.proj ? fmt(r.proj.trb,1) : '—'}</td>
       <td>${r.proj ? fmt(r.proj.ast,1) : '—'}</td>
       <td>${r.proj ? fmt(r.proj.tpm,1) : '—'}</td>
-      <td><b>${r.fpts!=null ? fmt(r.fpts,1) : '—'}</b></td>
+      <td title="${r.fptsObj ? 'Core: '+fmt(r.fptsObj.core,1)+' + Bonus (expected, from DD/TD/40+/50+/15ast/20reb thresholds): '+fmt(r.fptsObj.bonus,1) : ''}">${r.fptsObj ? fmt(r.fptsObj.bonus,1) : '—'}</td>
+      <td><b>${r.fptsObj ? fmt(r.fptsObj.total,1) : '—'}</b></td>
     </tr>`;
 
     const unmatched = rows.filter(r => !r.local);
     const startersSet = rows.filter(r=>r.isStarter);
     const benchSet = rows.filter(r=>!r.isStarter);
-    const bestBenchNotStarting = benchSet.filter(r=>r.fpts!=null).sort((a,b)=>(b.fpts-a.fpts))[0];
-    const worstStarterPlaying = startersSet.filter(r=>r.fpts!=null).sort((a,b)=>(a.fpts-b.fpts))[0];
+    const bestBenchNotStarting = benchSet.filter(r=>r.fptsObj).sort((a,b)=>(b.fptsObj.total-a.fptsObj.total))[0];
+    const worstStarterPlaying = startersSet.filter(r=>r.fptsObj).sort((a,b)=>(a.fptsObj.total-b.fptsObj.total))[0];
     let suggestion = '';
-    if (bestBenchNotStarting && worstStarterPlaying && bestBenchNotStarting.fpts > worstStarterPlaying.fpts + 3) {
-      suggestion = `<div class="out-banner">Possible swap for the next game day: <b>${bestBenchNotStarting.name}</b> (bench, proj ${fmt(bestBenchNotStarting.fpts,1)} pts) projects notably higher than your current starter <b>${worstStarterPlaying.name}</b> (proj ${fmt(worstStarterPlaying.fpts,1)} pts) for their next game. Rough heuristic only — check real-time injury news before making the swap.</div>`;
+    if (bestBenchNotStarting && worstStarterPlaying && bestBenchNotStarting.fptsObj.total > worstStarterPlaying.fptsObj.total + 3) {
+      suggestion = `<div class="out-banner">Possible swap for the next game day: <b>${bestBenchNotStarting.name}</b> (bench, proj ${fmt(bestBenchNotStarting.fptsObj.total,1)} pts) projects notably higher than your current starter <b>${worstStarterPlaying.name}</b> (proj ${fmt(worstStarterPlaying.fptsObj.total,1)} pts) for their next game. Rough heuristic only — check real-time injury news before making the swap.</div>`;
     } else {
       suggestion = `<div class="small-muted" style="margin-bottom:10px">No standout bench-over-starter swap found for the next game day based on this model.</div>`;
     }
@@ -1404,14 +1458,15 @@ document.getElementById('methodologyOut').innerHTML = `
     out.innerHTML = `
       <div class="panel">
         <h2>${league.name}</h2>
-        <div class="small-muted">Scoring: points league (not a standard category league) — fpts below use your league’s real per-stat weights, limited to the categories this tool models (PTS/REB/AST/STL/BLK/TOV/3PM). Sorted by next-game projected fantasy points, best to worst.</div>
+        <div class="small-muted">Scoring: points league — fpts below use your league's real per-stat weights, including DD/TD, 40+/50+ point, 15+ assist, and 20+ rebound bonuses (modeled as expected value — hover the Bonus column for the breakdown; see note below the table). Sorted by next-game projected fantasy points, best to worst.</div>
       </div>
       ${suggestion}
       <div class="table-wrap"><table>
-        <thead><tr><th class="name-cell">Player</th><th>Team</th><th>Next Game</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>Proj FPTS</th></tr></thead>
+        <thead><tr><th class="name-cell">Player</th><th>Team</th><th>Next Game</th><th>PTS</th><th>REB</th><th>AST</th><th>3PM</th><th>Bonus (exp.)</th><th>Proj FPTS</th></tr></thead>
         <tbody>${rows.map(fmtRow).join('')}</tbody>
       </table></div>
-      ${unmatched.length ? `<div class="panel small-muted" style="margin-top:10px">Not matched to this tool’s player pool (name mismatch or not in the 429-player dataset): ${unmatched.map(r=>r.name).join(', ')}</div>` : ''}
+      <div class="small-muted" style="margin-top:8px">Bonus column is an <b>expected value</b> for DD/TD/40+pt/50+pt/15+ast/20+reb thresholds — modeled from each player's projected average using an assumed game-to-game variance (this tool doesn't have real per-game variance data), not a guarantee. <b>Not modeled:</b> FG/FT makes-misses scoring (your league awards points per make and deducts per miss — this tool only has shooting percentages, not attempt volume, so it can't compute makes/misses yet) and technical/flagrant fouls (unpredictable).</div>
+      ${unmatched.length ? `<div class="panel small-muted" style="margin-top:10px">Not matched to this tool's player pool (name mismatch or not in the 429-player dataset): ${unmatched.map(r=>r.name).join(', ')}</div>` : ''}
     `;
 
     out.querySelectorAll('.player-link').forEach(el=>{
