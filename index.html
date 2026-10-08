@@ -119,8 +119,8 @@ nav.subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
         <input type="text" id="playerSearch" placeholder="Type a player name...">
       </div>
       <div class="field">
-        <label>Simulate: teammate OUT</label>
-        <select id="playerOutSelect"><option value="">— None —</option></select>
+        <label>Simulate: teammates OUT <span class="small-muted" style="font-weight:normal">(Ctrl/Cmd-click to select multiple)</span></label>
+        <select id="playerOutSelect" multiple size="4"></select>
       </div>
     </div>
   </div>
@@ -171,8 +171,8 @@ nav.subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
           <select id="slateGameSelect"></select>
         </div>
         <div class="field">
-          <label>Simulate: teammate OUT</label>
-          <select id="slateOutSelect"><option value="">— None —</option></select>
+          <label>Simulate: teammates OUT <span class="small-muted" style="font-weight:normal">(Ctrl/Cmd-click to select multiple)</span></label>
+          <select id="slateOutSelect" multiple size="4"></select>
         </div>
       </div>
     </div>
@@ -676,51 +676,73 @@ function injuryDetailHTML(p){
   return `<div class="small-muted" style="margin-top:6px"><span class="badge ${cls}">${p.inj.status}</span> ${p.inj.note} <span style="opacity:.7">(as of ${p.inj.as_of})</span></div>`;
 }
 
-// ---------- USAGE REDISTRIBUTION ("teammate OUT" simulation) ----------
-// When a teammate is marked OUT, their vacated production (minutes, shots, playmaking) is
-// redistributed across the real remaining rostered teammates, weighted by each teammate's own
-// real 2025-26 Usage Rate (a proxy for "how much of the offense already runs through them"),
-// with a bonus for teammates who share the OUT player's primary position (who typically inherit
-// the specific role, not just general touches). This is a heuristic estimate, not a guarantee —
-// real NBA usage redistribution varies by coach, game plan, and who else is available. See
-// Methodology for the full model.
+// ---------- USAGE REDISTRIBUTION ("teammates OUT" simulation) ----------
+// When one or more teammates are marked OUT, their vacated production (minutes, shots,
+// playmaking) is redistributed across the real remaining rostered teammates, weighted by each
+// teammate's own real 2025-26 Usage Rate (a proxy for "how much of the offense already runs
+// through them"), with a bonus for teammates who share an OUT player's primary position (who
+// typically inherit the specific role, not just general touches). Multiple OUT players are
+// handled by running this same per-player model once for EACH OUT player (against a roster that
+// excludes every currently-OUT player, so none of them can absorb each other's minutes) and
+// summing the resulting gains — i.e. a teammate's bump from a second OUT starter stacks on top
+// of their bump from the first, rather than the two being shared out of one combined pool. This
+// is a heuristic estimate, not a guarantee — real NBA usage redistribution varies by coach, game
+// plan, and who else is available. See Methodology for the full model.
 function usageWeight(p){
   return (typeof p.usg === 'number' && p.usg>0) ? p.usg : 15;
 }
 
-function usageRedistribution(player, outPlayer, teamAbbr){
-  if(!outPlayer || player.id===outPlayer.id) return null;
-  const roster = playersForTeam(teamAbbr).filter(p=>p.id!==outPlayer.id);
+function usageRedistributionMulti(player, outPlayers, teamAbbr){
+  const outs = (outPlayers||[]).filter(op=>op && op.id!==player.id);
+  if(!outs.length) return null;
+  const outIds = new Set(outs.map(op=>op.id));
+  const roster = playersForTeam(teamAbbr).filter(p=>!outIds.has(p.id));
   if(!roster.length) return null;
-  const outPos = (outPlayer.pos||'').split('-')[0];
-  const weighted = roster.map(p=>{
-    let w = usageWeight(p);
-    if((p.pos||'').split('-')[0]===outPos) w *= 1.3;
-    return {p, w};
+
+  const REDIST = 0.75; // fraction of each OUT player's own production assumed absorbed by the roster (rest is simply lost possessions/pace, not fully backfilled)
+  const totals = {extraMin:0, ptsGain:0, trbGain:0, astGain:0, tpmGain:0, stlGain:0, blkGain:0, tovGain:0, shares:[]};
+
+  outs.forEach(outPlayer=>{
+    const outPos = (outPlayer.pos||'').split('-')[0];
+    const weighted = roster.map(p=>{
+      let w = usageWeight(p);
+      if((p.pos||'').split('-')[0]===outPos) w *= 1.3;
+      return {p, w};
+    });
+    const totalW = weighted.reduce((a,x)=>a+x.w,0);
+    const mine = weighted.find(x=>x.p.id===player.id);
+    if(!mine || !totalW) return;
+    const share = mine.w / totalW;
+    totals.shares.push({name: outPlayer.n, share});
+
+    const samePos = (player.pos||'').split('-')[0]===outPos;
+    const astMult = samePos ? 1.15 : 0.85; // ball-handling load transfers more to same-position teammates
+
+    totals.extraMin += outPlayer.mpg * share * 0.6;
+    totals.ptsGain += outPlayer.pts * share * REDIST;
+    totals.trbGain += outPlayer.trb * share * REDIST * 0.85;
+    totals.astGain += outPlayer.ast * share * REDIST * astMult;
+    totals.tpmGain += outPlayer.tpm * share * REDIST * 0.8;
+    totals.stlGain += outPlayer.stl * share * REDIST * 0.5;
+    totals.blkGain += outPlayer.blk * share * REDIST * 0.5;
+    totals.tovGain += outPlayer.tov * share * REDIST * 0.6;
   });
-  const totalW = weighted.reduce((a,x)=>a+x.w,0);
-  const mine = weighted.find(x=>x.p.id===player.id);
-  if(!mine || !totalW) return null;
-  const share = mine.w / totalW;
 
-  const REDIST = 0.75; // fraction of the OUT player's own production assumed absorbed by the roster (rest is simply lost possessions/pace, not fully backfilled)
-  const samePos = (player.pos||'').split('-')[0]===outPos;
-  const astMult = samePos ? 1.15 : 0.85; // ball-handling load transfers more to same-position teammates
-
-  return {
-    share,
-    extraMin: Math.max(0, Math.min(40 - player.mpg, outPlayer.mpg * share * 0.6)),
-    ptsGain: outPlayer.pts * share * REDIST,
-    trbGain: outPlayer.trb * share * REDIST * 0.85,
-    astGain: outPlayer.ast * share * REDIST * astMult,
-    tpmGain: outPlayer.tpm * share * REDIST * 0.8,
-    stlGain: outPlayer.stl * share * REDIST * 0.5,
-    blkGain: outPlayer.blk * share * REDIST * 0.5,
-    tovGain: outPlayer.tov * share * REDIST * 0.6,
-  };
+  if(!totals.shares.length) return null;
+  // Cap total added minutes once, across all OUT players combined, so stacking multiple absences
+  // can never push a player past a realistic ceiling.
+  totals.extraMin = Math.max(0, Math.min(40 - player.mpg, totals.extraMin));
+  return totals;
 }
 
-// Applies a usageRedistribution() delta on top of a normal computeProjection() result.
+// Formats the per-OUT-player usage-share breakdown from usageRedistributionMulti() for the
+// on-screen banner, e.g. "~18% of Luka Doncic's, ~9% of Austin Reaves's".
+function shareSummaryText(delta){
+  if(!delta || !delta.shares || !delta.shares.length) return '';
+  return delta.shares.map(s=>`~${fmt(s.share*100,0)}% of ${s.name}'s`).join(', ');
+}
+
+// Applies a usageRedistributionMulti() delta on top of a normal computeProjection() result.
 function applyRedistribution(proj, delta){
   if(!delta) return proj;
   const min = Math.min(40, proj.min + delta.extraMin);
@@ -762,13 +784,20 @@ const playerSelect = document.getElementById('playerSelect');
 const playerSearch = document.getElementById('playerSearch');
 const playerOutSelect = document.getElementById('playerOutSelect');
 
-// Populates the "Simulate: teammate OUT" dropdown with the given player's real rostered teammates.
+// Populates the "Simulate: teammates OUT" multi-select with the given player's real rostered
+// teammates, preserving whichever teammates are already checked across re-populates (this runs
+// on every re-render, since toggling the OUT list itself triggers a re-render).
 function populateOutSelect(selectEl, player){
-  if(!player){ selectEl.innerHTML = '<option value="">— None —</option>'; return; }
+  if(!player){ selectEl.innerHTML = ''; return; }
   const teammates = playersForTeam(player.t).filter(p=>p.id!==player.id);
-  const prev = selectEl.value;
-  selectEl.innerHTML = '<option value="">— None —</option>' + teammates.map(p=>`<option value="${p.id}">${p.n} (${fmt(p.usg,1)}% USG)</option>`).join('');
-  if(teammates.some(p=>String(p.id)===prev)) selectEl.value = prev;
+  const prevSelected = new Set(Array.from(selectEl.selectedOptions||[]).map(o=>o.value));
+  selectEl.innerHTML = teammates.map(p=>`<option value="${p.id}">${p.n} (${fmt(p.usg,1)}% USG)</option>`).join('');
+  Array.from(selectEl.options).forEach(o=>{ if(prevSelected.has(o.value)) o.selected = true; });
+}
+
+// Reads the currently-checked ids out of a "teammates OUT" multi-select.
+function selectedOutIds(selectEl){
+  return Array.from(selectEl.selectedOptions||[]).map(o=>parseInt(o.value)).filter(v=>!isNaN(v));
 }
 
 function populateTeamSelects(){
@@ -809,9 +838,9 @@ function renderPlayerDetail(id){
   const sch = team ? team.sch : [];
 
   populateOutSelect(playerOutSelect, p);
-  const outId = playerOutSelect.value ? parseInt(playerOutSelect.value) : null;
-  const outPlayer = outId!=null ? PLAYERS.find(x=>x.id===outId) : null;
-  const delta = outPlayer ? usageRedistribution(p, outPlayer, p.t) : null;
+  const outIds = selectedOutIds(playerOutSelect);
+  const outPlayers = outIds.map(id=>PLAYERS.find(x=>x.id===id)).filter(Boolean);
+  const delta = outPlayers.length ? usageRedistributionMulti(p, outPlayers, p.t) : null;
 
   const rows = sch.map(g=>{
     let proj = computeProjection(p, g, p.t);
@@ -855,7 +884,7 @@ function renderPlayerDetail(id){
     return vals.reduce((a,b)=>a+b,0)/vals.length;
   };
 
-  const outBanner = outPlayer ? `<div class="out-banner">Simulating <b>${outPlayer.n}</b> OUT — ${p.n} is projected to absorb ~${fmt(delta.share*100,0)}% of ${outPlayer.n}'s usage share (weighted by real Usage Rate and position match). Every row below reflects this adjustment. This is a heuristic estimate, not a guarantee.</div>` : '';
+  const outBanner = outPlayers.length ? `<div class="out-banner">Simulating <b>${outPlayers.map(x=>x.n).join(', ')}</b> OUT — ${p.n} is projected to absorb ${shareSummaryText(delta)} usage share (weighted by real Usage Rate and position match). Every row below reflects this adjustment. This is a heuristic estimate, not a guarantee.</div>` : '';
 
   document.getElementById('playerDetail').innerHTML = `
     ${outBanner}
@@ -955,7 +984,9 @@ function populateSlateGames(){
 function populateSlateOutSelect(){
   const abbr = slateTeamSelect.value;
   const roster = playersForTeam(abbr);
-  slateOutSelect.innerHTML = '<option value="">— None —</option>' + roster.map(p=>`<option value="${p.id}">${p.n} (${fmt(p.usg,1)}% USG)</option>`).join('');
+  const prevSelected = new Set(Array.from(slateOutSelect.selectedOptions||[]).map(o=>o.value));
+  slateOutSelect.innerHTML = roster.map(p=>`<option value="${p.id}">${p.n} (${fmt(p.usg,1)}% USG)</option>`).join('');
+  Array.from(slateOutSelect.options).forEach(o=>{ if(prevSelected.has(o.value)) o.selected = true; });
 }
 function renderSlate(){
   const abbr = slateTeamSelect.value;
@@ -964,17 +995,18 @@ function renderSlate(){
   const g = team.sch[idx];
   if(!g){ document.getElementById('slateOut').innerHTML=''; return; }
   const roster = playersForTeam(abbr);
-  const outId = slateOutSelect.value ? parseInt(slateOutSelect.value) : null;
-  const outPlayer = outId!=null ? roster.find(p=>p.id===outId) : null;
+  const outIds = selectedOutIds(slateOutSelect);
+  const outIdSet = new Set(outIds);
+  const outPlayers = roster.filter(p=>outIdSet.has(p.id));
   const rows = roster.map(p=>{
-    if(outPlayer && p.id===outPlayer.id){
+    if(outIdSet.has(p.id)){
       return `<tr style="opacity:.55">
         <td class="name-cell"><a class="player-link" data-pid="${p.id}">${p.n}</a> <span class="badge away">OUT</span></td>
         <td>${p.pos}</td><td>—</td><td colspan="9" class="small-muted">Marked out — not projected. Teammates below are adjusted to absorb their usage.</td>
       </tr>`;
     }
     let proj = computeProjection(p, g, abbr);
-    const delta = outPlayer ? usageRedistribution(p, outPlayer, abbr) : null;
+    const delta = outPlayers.length ? usageRedistributionMulti(p, outPlayers, abbr) : null;
     if(delta) proj = applyRedistribution(proj, delta);
     return `<tr>
       <td class="name-cell"><a class="player-link" data-pid="${p.id}">${p.n}</a>${injuryBadgeShort(p)}</td>
@@ -989,7 +1021,7 @@ function renderSlate(){
     </tr>`;
   }).join('');
   const opp = TEAMS[g.opp];
-  const outBanner = outPlayer ? `<div class="out-banner">Simulating <b>${outPlayer.n}</b> OUT for this game — remaining ${team.name} players below have their MIN/PTS/REB/AST/3PM/TOV adjusted upward based on real Usage Rate share and position match. Heuristic estimate.</div>` : '';
+  const outBanner = outPlayers.length ? `<div class="out-banner">Simulating <b>${outPlayers.map(x=>x.n).join(', ')}</b> OUT for this game — remaining ${team.name} players below have their MIN/PTS/REB/AST/3PM/TOV adjusted upward based on real Usage Rate share and position match. Heuristic estimate.</div>` : '';
   document.getElementById('slateOut').innerHTML = `
     ${outBanner}
     <div class="panel">
