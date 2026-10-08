@@ -256,7 +256,8 @@ const COACH_ADJ = {
   POR: {mult: 0.995, label: "Nori scheme-continuity nudge (assistant-level, smallest weight)"},
 };
 
-// ---------- CRAFTEDNBA "PLAYER TRAITS" INDIVIDUAL DEFENDER ADJUSTMENT (added Oct 8, 2026) ----------
+// ---------- CRAFTEDNBA "PLAYER TRAITS" INDIVIDUAL MATCHUP ADJUSTMENT (added Oct 8, 2026; generalized
+// to all 5 positions Oct 8, 2026 per follow-up request) ----------
 // User-requested feature: craftednba.com publishes CraftedDPM ("Crafted Defensive Plus-Minus"), a
 // plus-minus-style defensive rating documented at craftednba.com/glossary as a weighted blend of five
 // public defensive metrics (DARKO, LEBRON, DRIP, BPM, and LA3 RAPM — see Methodology for the exact
@@ -264,57 +265,153 @@ const COACH_ADJ = {
 // plus-minus metrics. Both were reviewed to understand how CraftedNBA derives them before building this.
 //
 // The specific ask: team-wide Defense-vs-Position (DVP_RAW above) already tells you that, say, Utah
-// allows below-average scoring to centers as a group — but it can't tell you that an elite individual
-// rim protector (a Rudy Gobert, a Victor Wembanyama) suppresses a matched-up center's shot quality at
-// the rim far more than a replacement-level backup center would, pushing that player toward jumpers,
-// passing, or deferring rather than attacking the basket. CraftedDPM — a real, individual-player signal
-// — is used here to capture exactly that, as a position-specific layer on top of (not a replacement
-// for) the team-level DVP data.
+// allows below-average scoring to centers as a group — but it can't tell you that an elite INDIVIDUAL
+// defender (a Rudy Gobert at the rim, or a lockdown wing/guard on the perimeter) suppresses a matched-up
+// player's shot quality far more than a replacement-level backup at that same spot would. Originally
+// built for centers only (the "centre vs. Rudy Gobert" example); generalized below to all five positions
+// per the follow-up ask ("when a SG is facing a great defending guard and it's the no.1 matchup"), which
+// also adds a second real effect: how hard a defense leans into a specific individual matchup in the
+// first place depends on whether the offensive player is actually that team's featured option at their
+// spot — a team's clear #1 scoring guard draws the other team's best perimeter defender far more
+// often/consistently than its third guard off the bench does, so the whole effect is scaled by a
+// usage-based "primacy" factor below (CRAFTED_PRIMACY), not applied uniformly to every player at a spot.
 //
-// CRAFTED_DEF_C[team] = that team's best currently-active (non-"Out") C-position CraftedDPM value,
-// pulled live from craftednba.com/player-traits/defense (Minutes Played and %tile filters both set to 0
-// to get the full ~419-player league dataset, Oct 8 2026 snapshot) and matched BY PLAYER NAME to this
-// tool's own PLAYERS roster/position data — deliberately NOT using craftednba.com's own team tags,
-// which were cross-checked against our own audited rosters and found to be stale for several players
-// (e.g. that site still had Ivica Zubac tagged to Indiana and Karl-Anthony Towns to New York, which don't
-// match this tool's own researched 2026-27 rosters). Players currently marked "Out" (see p.inj) are
-// excluded from being a team's representative defender — e.g. Utah's Jusuf Nurkic (2.5 DPM, elite) is
-// injured as of this snapshot, so Utah's value below correctly falls back to Jaxson Hayes (0.7) instead.
-// This is a point-in-time snapshot like the rest of this tool's injury data — it does not auto-update
-// as injuries change or as a backup overtakes a starter; revisit periodically (see Methodology).
+// CRAFTED_DEF_BY_POS[bucket][team] = that team's best currently-active (non-"Out") CraftedDPM value at
+// that position bucket, pulled live from craftednba.com/player-traits/defense (Minutes Played and %tile
+// filters both set to 0 to unlock the full ~419-player league dataset, Oct 8 2026 snapshot) and matched
+// BY PLAYER NAME to this tool's own PLAYERS roster/position data — deliberately NOT using
+// craftednba.com's own team tags, which were cross-checked against our own audited rosters and found to
+// be stale for several players (e.g. that site still had Ivica Zubac tagged to Indiana and Karl-Anthony
+// Towns to New York). Players currently marked "Out" (see p.inj) are excluded from being a team's
+// representative defender at a spot — e.g. Utah's Jusuf Nurkic (2.5 DPM, elite) is injured as of this
+// snapshot, so Utah's C value below correctly falls back to Jaxson Hayes (0.7) instead.
 //
-// CRAFTED_C_AVG / CRAFTED_C_STD: the mean and population standard deviation of CraftedDPM across all 103
-// center-tagged players in that same 419-player snapshot — used below to convert a team's raw DPM
-// value into a clamped z-score (how many standard deviations better/worse than an average center defender).
-const CRAFTED_DEF_C = {"ATL":1.3,"BKN":2.1,"BOS":3.2,"CHA":1.3,"CHI":1.3,"CLE":2.2,"DAL":2.7,"DEN":2.5,"DET":0.7,"GSW":1.1,"HOU":2.5,"IND":1.7,"LAC":1.5,"LAL":1.6,"MEM":2.4,"MIA":2.3,"MIL":1.2,"MIN":4.4,"NOP":1.1,"NYK":0.7,"OKC":3.7,"ORL":2.1,"PHI":1.0,"PHX":1.0,"POR":2.6,"SAC":1.8,"SAS":5.3,"TOR":2.3,"UTA":0.7,"WAS":0.4};
-const CRAFTED_C_AVG = 0.92;
-const CRAFTED_C_STD = 1.27;
+// CraftedNBA's own leaderboard only buckets players into four groups — PG, SG, SF, and C; there's no
+// separate PF bucket in their data at all. craftedBucketForPlayer() below maps this tool's PF-tagged
+// players into whichever of those four buckets actually fits their game: a stretch 4 who already shoots
+// a real number of 3s (tpm >= 1.0/game) is treated like a wing (SF bucket, since that's who typically
+// guards him on switches), while a traditional post/roll 4 is treated like a big (C bucket). The same
+// fallback also quietly fixes a real position-tag mismatch already in this tool's own data — Phoenix's
+// Oso Ighodaro is tagged PF here but plays as a true center (and CraftedNBA tags him C); the tpm<1.0 rule
+// correctly routes him into the C bucket for matchup purposes either way. A handful of generic 'G'/'F'/
+// 'GF' bench tags map to the nearest bucket (G→SG, F/GF→SF). A few real, healthy players are simply
+// absent from CraftedNBA's own 419-player snapshot entirely (e.g. Michael Porter Jr., Draymond Green,
+// Jerami Grant weren't found there as of this pull, likely an artifact of their offseason team moves not
+// yet being reflected in CraftedNBA's own data) — those teams' bucket values are just left undefined
+// below, which safely no-ops the adjustment for that team/bucket rather than guessing.
+//
+// CRAFTED_POS_STATS[bucket] = {avg, std}: the mean and population standard deviation of CraftedDPM across
+// every player CraftedNBA itself tags with that bucket in the same 419-player snapshot — used to turn
+// a team's raw DPM value into a clamped z-score (how many standard deviations better/worse than an
+// average defender at that spot). Note guard/wing averages run slightly negative (e.g. SG avg -0.35) —
+// CraftedDPM is zero-centered on OFFENSIVE-POSSESSION-weighted value, not re-centered per bucket, so a
+// "replacement-level" perimeter defender actually grades out a bit below zero on this scale; the z-score
+// conversion handles that automatically since it's relative to each bucket's own distribution.
+const CRAFTED_DEF_BY_POS = {
+  PG: {"OKC":1.8,"SAS":0.4,"DET":0.7,"BOS":0.9,"DEN":-0.5,"NYK":0.6,"LAL":0.2,"CLE":1,"HOU":1.6,"MIN":0.2,"PHX":0.5,"TOR":0.7,"ATL":-0.2,"POR":0.7,"ORL":2.8,"LAC":2.1,"PHI":-0.4,"GSW":1.2,"NOP":-0.8,"DAL":-0.4,"MEM":1.1,"UTA":-2,"CHA":-1.4,"MIA":0.9,"MIL":1.1,"CHI":-0.2,"BKN":-0.1,"IND":0.2,"WAS":-1},
+  SG: {"OKC":3.8,"SAS":0.6,"DET":2,"BOS":2.4,"DEN":0.3,"NYK":2.2,"LAL":2.8,"CLE":0.1,"HOU":2.2,"MIN":0.9,"PHX":1.4,"TOR":0.4,"ATL":2.1,"ORL":0.1,"LAC":0,"PHI":0.5,"GSW":1.4,"NOP":-0.3,"DAL":-0.7,"MEM":0,"SAC":0.2,"UTA":1.4,"CHA":1.1,"MIA":2.1,"MIL":0.6,"CHI":-0.4,"BKN":1.5,"IND":-0.7,"WAS":0.2},
+  SF: {"OKC":3.9,"SAS":0.8,"DET":3.5,"BOS":1.6,"DEN":1,"NYK":2,"LAL":0.6,"CLE":0,"HOU":0.4,"MIN":1.4,"PHX":0.8,"TOR":1.5,"ATL":0.8,"POR":1,"ORL":0.7,"PHI":-1,"NOP":2.3,"DAL":1.2,"SAC":-1.1,"UTA":-1.2,"CHA":0.5,"MIA":0.3,"MIL":-0.7,"CHI":-0.7,"IND":-0.2,"WAS":0},
+  C: {"OKC":3.7,"SAS":5.3,"DET":0.7,"BOS":3.2,"DEN":2.5,"NYK":0.7,"LAL":1.6,"CLE":2.2,"HOU":2.5,"MIN":4.4,"PHX":2.4,"TOR":2.3,"ATL":2.3,"POR":2.6,"ORL":2.1,"LAC":1.5,"PHI":1,"GSW":1.1,"NOP":1.1,"DAL":2.7,"MEM":2.4,"SAC":1.8,"UTA":0.7,"CHA":1.3,"MIA":2.3,"MIL":1.2,"CHI":1.3,"BKN":2.1,"IND":1.7,"WAS":1.9},
+};
+const CRAFTED_POS_STATS = {
+  PG: {avg:-0.1386, std:1.1396},
+  SG: {avg:-0.3479, std:1.0029},
+  SF: {avg:-0.0541, std:1.1001},
+  C:  {avg:0.9223,  std:1.2744},
+};
 
-// Returns multipliers {fgp, pts, ast, tpm} for a C-position offensive player facing oppAbbr's best
-// active rim protector. Non-centers are unaffected (returns all-1 multipliers) — see Methodology for
-// why this is scoped to centers only, matching the user's own "centre vs. Rudy Gobert" framing. z = how
-// many std devs above/below an average center defender oppAbbr's best active C grades out at (clamped to
-// +-2 so one extreme outlier, e.g. Wembanyama at z~3.5, doesn't blow past the clamped bands below).
-// Efficiency (fgp) carries the most weight since rim shots are the most directly contested; raw scoring
-// volume (pts) gets a smaller, secondary suppression since a good offensive player still gets touches,
-// just lower-value ones. The suppressed shot value doesn't just vanish — it's partially redirected to
-// assists (scaled by the player's OWN existing ast rate, so a genuine passing big like Jokic redirects far
-// more than a pure rim-running roll man) and to 3PM for players who already show a real stretch-shooting
-// profile (scaled by their own tpm rate) — modeling a center who settles for the pass or steps out
-// rather than forcing a contested look at the rim, exactly as described in the feature request.
-function craftedRimAdjust(player, oppAbbr){
-  const neutral = {fgp:1, pts:1, ast:1, tpm:1};
-  if(!player.pos || player.pos.split('-').indexOf('C') === -1) return neutral;
-  const defC = CRAFTED_DEF_C[oppAbbr];
-  if(defC === undefined) return neutral;
-  const z = Math.max(-2, Math.min(2, (defC - CRAFTED_C_AVG) / CRAFTED_C_STD));
-  const passFactor = Math.max(0, Math.min(1.5, (player.ast||0) / 3.0));
-  const spaceFactor = Math.max(0, Math.min(1.5, (player.tpm||0) / 1.5));
+// See the big comment block above for the PF→bucket heuristic and the G/F/GF fallback.
+function craftedBucketForPlayer(player){
+  const seg = (player.pos||'').split('-')[0];
+  if(seg === 'PG') return 'PG';
+  if(seg === 'SG' || seg === 'G') return 'SG';
+  if(seg === 'SF' || seg === 'F' || seg === 'GF') return 'SF';
+  if(seg === 'C') return 'C';
+  if(seg === 'PF') return (player.tpm||0) >= 1.0 ? 'SF' : 'C';
+  return null;
+}
+
+// CRAFTED_PRIMACY[player.id] = how much of the full matchup-adjustment effect this specific player gets,
+// based on their Usage Rate rank among their OWN teammates who share the same crafted bucket — the
+// team's highest-usage player at a spot (its real #1 option there) gets the full effect, the next-highest
+// gets just over half, and everyone else gets a small residual effect (a plausible defense still sometimes
+// has its best defender switch onto a complementary player, just not as the primary assignment). Computed
+// once at load from the same PLAYERS array used everywhere else in this tool.
+const CRAFTED_PRIMACY = {};
+(function buildCraftedPrimacy(){
+  const byTeamBucket = {};
+  PLAYERS.forEach(p => {
+    const bucket = craftedBucketForPlayer(p);
+    if(!bucket) return;
+    const key = p.t + '|' + bucket;
+    (byTeamBucket[key] = byTeamBucket[key] || []).push(p);
+  });
+  Object.keys(byTeamBucket).forEach(key => {
+    const list = byTeamBucket[key].slice().sort((a,b) => (b.usg||0) - (a.usg||0));
+    list.forEach((p, i) => { CRAFTED_PRIMACY[p.id] = i===0 ? 1.0 : (i===1 ? 0.55 : 0.3); });
+  });
+})();
+
+// Returns multipliers {fgp, pts, ast, tpm, tov} for an offensive player facing oppAbbr's best active
+// defender at their own crafted bucket, scaled by CRAFTED_PRIMACY (see above). z = how many std devs
+// above/below an average defender at that bucket oppAbbr's best active defender grades out at (clamped
+// to +-2 so one extreme outlier, e.g. Wembanyama, doesn't blow past the clamped bands below); ez is that
+// z further scaled down for anyone who isn't their own team's clear #1 at the spot.
+//
+// The C-bucket effect keeps the original "rim protector" framing: efficiency (fgp) suppressed the most
+// since rim shots are the most directly contested, a smaller secondary suppression on raw scoring volume
+// (pts), and part of that lost value explicitly redirected into assists (scaled by the player's own
+// existing ast rate — a genuine passing big like Jokic redirects far more than a pure roll man) and
+// into 3PM for players who already show a real stretch-shooting profile (scaled by their own tpm rate) —
+// modeling a center settling for the pass or stepping out rather than forcing a contested rim look.
+//
+// The perimeter buckets (PG/SG/SF) work differently, per the follow-up request: a great perimeter
+// defender doesn't make an SG a better 3-point shooter the way an elite rim protector pushes a center
+// toward jumpers — there's no "step out and space the floor" redirect on the perimeter, since the
+// player's already out there. Instead it's suppression without redirect on fgp/pts/tpm, PLUS a turnover
+// bump (elite on-ball/point-of-attack defenders force more empty possessions), plus a modest assist
+// suppression that's largest for point guards specifically (ball pressure disrupts the read that creates
+// easy assists more than it disrupts an off-ball wing's assist opportunities).
+function craftedMatchupAdjust(player, oppAbbr){
+  const neutral = {fgp:1, pts:1, ast:1, tpm:1, tov:1};
+  const bucket = craftedBucketForPlayer(player);
+  if(!bucket) return neutral;
+  const defVal = CRAFTED_DEF_BY_POS[bucket] && CRAFTED_DEF_BY_POS[bucket][oppAbbr];
+  if(defVal === undefined) return neutral;
+  const stats = CRAFTED_POS_STATS[bucket];
+  const z = Math.max(-2, Math.min(2, (defVal - stats.avg) / stats.std));
+  const primacy = CRAFTED_PRIMACY[player.id] !== undefined ? CRAFTED_PRIMACY[player.id] : 0.3;
+  const ez = z * primacy;
+
+  if(bucket === 'C'){
+    const passFactor = Math.max(0, Math.min(1.5, (player.ast||0) / 3.0));
+    const spaceFactor = Math.max(0, Math.min(1.5, (player.tpm||0) / 1.5));
+    return {
+      fgp: Math.max(0.90, Math.min(1.10, 1 - 0.05*ez)),
+      pts: Math.max(0.93, Math.min(1.07, 1 - 0.035*ez)),
+      ast: Math.max(0.94, Math.min(1.12, 1 + 0.04*ez*passFactor)),
+      tpm: Math.max(0.94, Math.min(1.15, 1 + 0.06*ez*spaceFactor)),
+      tov: 1,
+    };
+  }
+  if(bucket === 'SF'){
+    const spaceFactor = Math.max(0.3, Math.min(1.5, (player.tpm||0) / 1.5));
+    return {
+      fgp: Math.max(0.92, Math.min(1.08, 1 - 0.04*ez)),
+      pts: Math.max(0.94, Math.min(1.06, 1 - 0.03*ez)),
+      ast: Math.max(0.95, Math.min(1.05, 1 - 0.015*ez)),
+      tpm: Math.max(0.92, Math.min(1.08, 1 - 0.03*ez*spaceFactor)),
+      tov: Math.max(0.95, Math.min(1.10, 1 + 0.03*ez)),
+    };
+  }
+  // PG or SG.
+  const astEffect = bucket === 'PG' ? 0.035 : 0.015;
   return {
-    fgp: Math.max(0.90, Math.min(1.10, 1 - 0.05*z)),
-    pts: Math.max(0.93, Math.min(1.07, 1 - 0.035*z)),
-    ast: Math.max(0.94, Math.min(1.12, 1 + 0.04*z*passFactor)),
-    tpm: Math.max(0.94, Math.min(1.15, 1 + 0.06*z*spaceFactor)),
+    fgp: Math.max(0.92, Math.min(1.08, 1 - 0.04*ez)),
+    pts: Math.max(0.94, Math.min(1.06, 1 - 0.035*ez)),
+    ast: Math.max(0.93, Math.min(1.07, 1 - astEffect*ez)),
+    tpm: Math.max(0.90, Math.min(1.10, 1 - 0.045*ez)),
+    tov: Math.max(0.95, Math.min(1.12, 1 + 0.035*ez)),
   };
 }
 
@@ -499,9 +596,9 @@ function computeProjection(player, game, teamAbbr){
   // the small defMult weight smooths over any single-position sample noise in the DvP table), then
   // layered with pace/site/rest exactly like the old generic combo.
   const playerPos = player.pos;
-  // CraftedNBA individual rim-protector adjustment (Oct 8, 2026 — see CRAFTED_DEF_C /
-  // craftedRimAdjust above and Methodology). No-op for non-centers.
-  const rim = craftedRimAdjust(player, oppAbbr);
+  // CraftedNBA individual matchup adjustment (Oct 8, 2026, generalized to all positions — see
+  // CRAFTED_DEF_BY_POS / craftedMatchupAdjust above and Methodology).
+  const rim = craftedMatchupAdjust(player, oppAbbr);
   function dvpCombo(statKey){
     const dvp = dvpMult(oppAbbr, playerPos, statKey);
     const blendedDef = dvp*0.7 + defMult*0.3;
@@ -518,7 +615,7 @@ function computeProjection(player, game, teamAbbr){
   const tpmCombo = dvpCombo('tpm') * offMult * rim.tpm;
   const stlComboRaw = dvpCombo('stl');
   const blkCombo = dvpCombo('blk');
-  const tovCombo = dvpCombo('tov');
+  const tovCombo = dvpCombo('tov') * rim.tov;
   const fgpCombo = dvpCombo('fgp') * rim.fgp;
 
   const pts = player.pts * ptsCombo;
@@ -1222,7 +1319,7 @@ document.getElementById('methodologyOut').innerHTML = `
 <li><b>Full 30-team roster-completeness pass, Sep 22, 2026:</b> prompted by a user report of specific missing names (Coby White off the Hornets; Grayson Allen and Royce O'Neale showing on the wrong team), every one of the 30 teams was checked in full against its real current roster (NBA.com/CBS Sports/RealGM, cross-verified with news reporting for every trade or signing that looked surprising), rather than just re-checking players already in the pool. This found <b>93 real, currently-rostered players with meaningful 2025-26 NBA production</b> who were missing entirely and added them with their real per-game baselines, plus corrected <b>3 stale team assignments</b>: <b>Grayson Allen</b> and <b>Royce O'Neale</b> were traded from Phoenix to <b>Charlotte</b> (along with Coby White, now added — both moves happened weeks before the Buddy Hield trade above, so all three land on the Hornets), and <b>Cam Whitmore</b> signed a two-way deal with <b>Denver</b> on Sep 18, 2026 and is no longer a Wizard (his real per-game line for the 2025-26 season carries over unchanged). This pass also caught and corrected a real error from the Sep 22 update above: <b>Nicolas Batum did not retire</b> — that was incorrect; he re-signed with the <b>LA Clippers</b> in June 2025 and played 74 games there in 2025-26, and he's added back with that real line. The 93 adds include several real, meaningful names beyond the headline three: <b>Jalen Duren</b> (DET's actual starting center, a significant omission), <b>Nikola Vucevic</b> (re-signed ORL), <b>Kristaps Porzingis</b> and <b>Rui Hachimura</b> (both now on Bay Area/LA rosters via free agency and trade respectively), <b>Anfernee Simons</b> (PHI, resolving a known gap flagged in the Sep 22 update above), and <b>CJ McCollum</b> (ATL, part of the same Trae Young/Corey Kispert deal already reflected in this pool). Player pool is now <b>432</b>. A handful of secondary fields (3-point makes, steals, or the offensive/defensive rebound split) weren't published by the sources used for a few of these adds and were estimated from the player's shooting profile and role rather than left blank — flagged here rather than silently guessed. <b>Deliberately left out</b> (consistent with the rookie-handling approach below): true 2026 draft rookies and unconfirmed/non-guaranteed training-camp (Exhibit-10) signings with no real 2025-26 NBA production to build a baseline from, and a handful of players whose team assignment or stat line came back genuinely ambiguous or contradictory across sources (flagged internally rather than guessed) — a full list of specific names is available on request. Ben Simmons (signed with Sacramento) and Duop Reath were confirmed real signings but still have no usable 2025-26 NBA production or roster confirmation respectively, so they remain a known gap.</li>
 <li><b>2026 draft rookies:</b> six rookies confirmed by beat-reporter depth-chart coverage as Week 1 starters (or, for Lendeborg, a strong "might start" case) are included with a real-data-grounded debut-season estimate rather than being left out entirely: <b>AJ Dybantsa</b> (WAS, No. 1 pick), <b>Darryn Peterson</b> (UTA, No. 2), <b>Cameron Boozer</b> (MEM, No. 3), <b>Caleb Wilson</b> (CHI, No. 4), <b>Mikel Brown Jr.</b> (BKN, No. 6), and <b>Yaxel Lendeborg</b> (GSW, 2026 Summer League MVP). Each estimate starts from that player's actual final 2025-26 college per-game line, translated down for NBA-level competition and usage using a real recent high-usage-rookie-starter comp (Cooper Flagg's and VJ Edgecombe's actual 2025-26 NBA rookie seasons) or, for Lendeborg, a same-team recent-rookie comp (Brandin Podziemski). <b>Sep 2026 methodology upgrade:</b> that college-translated number is now blended with each player's real 2026 NBA Summer League per-game production (points, rebounds, assists, shooting splits, pulled from box scores across their Summer League games), at a weight that reflects both role certainty and sample size &mdash; from 30% for AJ Dybantsa (only 2 games before being shut down) up to 60% for Cameron Boozer (the largest sample at 8 games, First Team All-Summer League). The five confirmed Week 1 starters also get a small explicit Usage Rate bump (+5% to +8%, largest for Caleb Wilson given Chicago has "no other veteran center" per beat coverage) since a named starting role is a stronger signal than a translated college number; Lendeborg, whose start is only "likely," gets none. This pulls some notably real signal into the projections &mdash; e.g. Darryn Peterson's rough 30.8% Summer League shooting (16-for-52) drags his projected efficiency down from the pure college translation rather than being smoothed away. These are still estimates, not played NBA regular-season games — see each player's note in the Player tab for the exact blend and sourcing. Every other new name on a 2026-27 roster (undrafted rookies, two-way signees, deep bench players with no recent NBA production) is intentionally left out of the projection pool rather than given a fabricated number — check the Team Roster tab for who's currently there.</li>
 <li><b>Mid-season trade splits:</b> players who were traded during the 2025-26 season itself (i.e., their box-score history is split across two Basketball-Reference team pages for that season) have the stint with more games played kept as the more representative 2025-26 baseline. This is a known simplification — check a player's "via [team]" note in the Player tab if their number looks off.</li>
-<li><b>Role-change adjustments, Oct 7 2026:</b> <b>Khaman Maluach</b> (PHX) projected minutes bumped from his real 2025-26 bench rate (8.9 MPG) to a projected 24.0 MPG, with pts/reb/ast/stl/blk/tov/3PM scaled proportionally and usage nudged to 18.5% — reflecting Mark Williams’ ~5-month shoulder-surgery absence and beat-reporting naming Maluach the in-house favorite to start, ahead of Oso Ighodaro and Nick Richards. Caveat: ESPN’s own official depth chart still listed Ighodaro as the starting C as of this writing — not yet a confirmed team decision; see his player note. Separately, <b>Jusuf Nurkic</b> (UTA) escalated from a minor Day-To-Day foot tag to <b>Out, est. return ~Nov 4</b> (partial plantar plate tear, second toe, right foot — Chris Haynes/NBA TV).</li><li><b>CraftedNBA individual rim-protector adjustment, Oct 8 2026:</b> reviewed craftednba.com’s published CraftedDPM/CraftedOPM formulas (a weighted blend of DARKO, LEBRON, DRIP, BPM, and LA3 RAPM — see craftednba.com/glossary) and pulled its full ~419-player CraftedDPM leaderboard (Minutes Played and percentile filters both set to 0 to unlock the full dataset) to add a new, position-scoped matchup layer: a center now gets a small efficiency/scoring suppression (clamped ±10%/±7%) when facing an opposing team’s best <i>currently-active</i> individual rim protector (e.g. a Rudy Gobert, Victor Wembanyama), with part of that suppressed value redirected into assists and 3PM scaled by the player’s own existing passing/shooting profile — modeling a center settling for the pass or stepping out to the perimeter rather than forcing a contested rim shot, exactly as requested. Opponent team’s best defender is matched by player <i>name</i> against this tool’s own audited roster/position data, not CraftedNBA’s own team tags (found to be stale for a few players, e.g. Ivica Zubac tagged to Indiana there), and currently-"Out" players are excluded from being a team’s representative rim protector (Utah correctly falls back from an injured Jusuf Nurkic to Jaxson Hayes, for example). Non-centers are unaffected. This is scoped to CraftedDPM’s individual-defender signal specifically — the broader CraftedOPM (offensive) metric was reviewed for completeness but isn’t separately re-applied here, since this tool’s own real per-player ast/3PM rates already drive the redistribution side of the formula. Like other injury-dependent judgments in this tool, the underlying defender snapshot is static until manually refreshed — see computeProjection()’s craftedRimAdjust() for the exact formula.</li></ul>
+<li><b>Role-change adjustments, Oct 7 2026:</b> <b>Khaman Maluach</b> (PHX) projected minutes bumped from his real 2025-26 bench rate (8.9 MPG) to a projected 24.0 MPG, with pts/reb/ast/stl/blk/tov/3PM scaled proportionally and usage nudged to 18.5% — reflecting Mark Williams’ ~5-month shoulder-surgery absence and beat-reporting naming Maluach the in-house favorite to start, ahead of Oso Ighodaro and Nick Richards. Caveat: ESPN’s own official depth chart still listed Ighodaro as the starting C as of this writing — not yet a confirmed team decision; see his player note. Separately, <b>Jusuf Nurkic</b> (UTA) escalated from a minor Day-To-Day foot tag to <b>Out, est. return ~Nov 4</b> (partial plantar plate tear, second toe, right foot — Chris Haynes/NBA TV).</li><li><b>CraftedNBA individual rim-protector adjustment, Oct 8 2026:</b> reviewed craftednba.com’s published CraftedDPM/CraftedOPM formulas (a weighted blend of DARKO, LEBRON, DRIP, BPM, and LA3 RAPM — see craftednba.com/glossary) and pulled its full ~419-player CraftedDPM leaderboard (Minutes Played and percentile filters both set to 0 to unlock the full dataset) to add a new, position-scoped matchup layer: a center now gets a small efficiency/scoring suppression (clamped ±10%/±7%) when facing an opposing team’s best <i>currently-active</i> individual rim protector (e.g. a Rudy Gobert, Victor Wembanyama), with part of that suppressed value redirected into assists and 3PM scaled by the player’s own existing passing/shooting profile — modeling a center settling for the pass or stepping out to the perimeter rather than forcing a contested rim shot, exactly as requested. Opponent team’s best defender is matched by player <i>name</i> against this tool’s own audited roster/position data, not CraftedNBA’s own team tags (found to be stale for a few players, e.g. Ivica Zubac tagged to Indiana there), and currently-"Out" players are excluded from being a team’s representative rim protector (Utah correctly falls back from an injured Jusuf Nurkic to Jaxson Hayes, for example). Non-centers are unaffected. This is scoped to CraftedDPM’s individual-defender signal specifically — the broader CraftedOPM (offensive) metric was reviewed for completeness but isn’t separately re-applied here, since this tool’s own real per-player ast/3PM rates already drive the redistribution side of the formula. Like other injury-dependent judgments in this tool, the underlying defender snapshot is static until manually refreshed — see computeProjection()’s craftedRimAdjust() for the exact formula.</li><li><b>CraftedNBA matchup adjustment generalized to all 5 positions, Oct 8 2026:</b> the above was originally centers-only; per follow-up feedback ("when a SG is facing a great defending guard and it’s the no.1 matchup, things like that need to be taken into account") it now covers PG/SG/SF/C using CraftedNBA’s own four defender buckets (their leaderboard has no separate PF group, so a PF here is routed to the SF bucket if he shoots a real number of 3s, 3PM/g ≥ 1.0, or the C bucket if he’s more of a traditional/roll big — see craftedBucketForPlayer()). Perimeter matchups (PG/SG/SF) are modeled differently from the center case: there’s no "step out and space the floor" redirect for a guard who’s already a perimeter player, so it’s a straight efficiency/scoring/3PM suppression plus a turnover bump (ball pressure/deflections) and a modest assist suppression that’s largest for point guards specifically. New this pass: a usage-rate-based "primacy" factor (CRAFTED_PRIMACY) scales the whole effect down for anyone who isn’t their own team’s highest-usage player at that spot — a defense’s best perimeter stopper realistically gets assigned to the other team’s actual #1 option there far more consistently than to a complementary starter or bench piece, so a team’s clear #1 at a spot gets the full effect, the next-highest usage player gets about half, and everyone else gets a small residual effect. This same generalization also quietly fixed a real position-tag mismatch already in this tool’s data: Phoenix’s Oso Ighodaro is tagged PF here but plays true center (CraftedNBA itself tags him C) — the PF routing rule above correctly treats him as a center for matchup purposes, which also means he (not Khaman Maluach) is now recognized as Phoenix’s best individual rim-protection matchup threat. Verified against all 34,320 player-game projections after the change: zero errors, zero NaNs. See craftedMatchupAdjust() and craftedBucketForPlayer() for the exact formula and position-routing rules.</li></ul>
 
 <h3>Matchup adjustments</h3>
 <p>Each projection multiplies the baseline by:</p>
