@@ -223,7 +223,7 @@ nav.subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
 
   <div class="panel">
     <h2 style="margin-top:0">Best Plays Today</h2>
-    <div class="small-muted" style="margin-bottom:8px">Ranked by the gap between this tool's own matchup-adjusted projection (already factoring in the opponent's real defense-vs-position) and the probability implied by Sportsbet's odds. This is a highlight on top of the full data, not a replacement for it -- every player and every line Sportsbet publishes is in the ladders below. Caveat: projections are built from last season's real per-game baseline plus matchup adjustments, not live in-season role changes (except for the 6 rookies and the small DvP blend described in Methodology) -- a very large edge can mean the market has priced in a 2026-27 role change (more/less minutes, a new team, a return from injury) that this tool's baseline hasn't caught up to yet, not necessarily a mispriced line. Treat big edges as a prompt to check the player's current role, not as a tip.</div>
+    <div class="small-muted" style="margin-bottom:8px">Ranked by the gap between this tool's own matchup-adjusted projection (already factoring in the opponent's real defense-vs-position) and the probability implied by Sportsbet's odds. This is a highlight on top of the full data, not a replacement for it -- every player and every line Sportsbet publishes is in the ladders below. These projections now also factor in real, currently-confirmed Out teammates automatically -- if a player's own roster has someone tagged Out (the same injury data behind the badges elsewhere in this tool), their vacated minutes/usage are redistributed into teammates' numbers here using the same model as the Player tab's "Teammates OUT" simulator (look for the "teammate(s) Out" note next to a player's projection). Caveat: outside that specific real-Out adjustment, projections are still built from last season's real per-game baseline plus matchup adjustments, not full live in-season role data (except for the 6 rookies and the small DvP blend described in Methodology) -- a very large edge can still mean the market has priced in a 2026-27 role change (a new starting job, a return from injury that is not yet reflected, a new team) that this tool's baseline has not caught up to, not necessarily a mispriced line. Treat big edges as a prompt to check the player's current role, not as a tip.</div>
     <div id="bestPlaysOut"></div>
   </div>
 
@@ -1467,10 +1467,27 @@ function bettingGameFor(player, bGame){
   return sch || null;
 }
 
+// Real (not simulated) teammates currently marked Out on this player's own roster -- the same
+// p.inj.status field the injury badges use, kept fresh by the daily update scheduled task.
+function bettingOutTeammatesFor(player){
+  return playersForTeam(player.t).filter(p => p.id!==player.id && p.inj && p.inj.status==='Out');
+}
+
 function bettingProjFor(player, bGame){
   const g = bettingGameFor(player, bGame);
   if(!g) return null;
-  return computeProjection(player, g, player.t);
+  const base = computeProjection(player, g, player.t);
+  // Automatically factor in real confirmed-Out teammates' vacated minutes/usage (the same
+  // usageRedistributionMulti/applyRedistribution model as the Player tab's "teammates OUT"
+  // simulator), so a real current injury on this player's own team feeds the betting projection
+  // without Damien having to flip the simulator by hand for every matchup.
+  const outTeammates = bettingOutTeammatesFor(player);
+  if(!outTeammates.length) return base;
+  const delta = usageRedistributionMulti(player, outTeammates, player.t);
+  if(!delta) return base;
+  const adjusted = applyRedistribution(base, delta);
+  adjusted.outContext = {names: outTeammates.map(p=>p.n), shareText: shareSummaryText(delta)};
+  return adjusted;
 }
 
 // Flattens the full BETTING_SLATE into one row per (game, market, player, line) -- this is the
@@ -1517,7 +1534,7 @@ function renderBestPlays(){
   const bodyRows = top.map(r=>{
     const edgeCls = r.edge >= 0.12 ? 'edge-pos' : (r.edge >= 0.05 ? 'edge-flat' : 'edge-neg');
     return `<tr>
-      <td class="name-cell">${r.player.n} <span class="small-muted">(${r.player.t})</span></td>
+      <td class="name-cell">${r.player.n} <span class="small-muted">(${r.player.t})</span>${r.proj && r.proj.outContext ? ` <span class="badge inj-q" title="Teammate(s) currently Out: ${r.proj.outContext.names.join(', ')} -- ${r.proj.outContext.shareText} of their production redistributed into this projection">+OUT</span>` : ''}</td>
       <td>${bettingMatchupLabel(r.bGame)}</td>
       <td>${BETTING_MARKET_LABEL[r.market]} ${r.line}+</td>
       <td>${oppRankBadge(r.player.t===r.bGame.homeAbbr ? r.bGame.awayAbbr : r.bGame.homeAbbr, r.player.pos)}</td>
@@ -1565,8 +1582,9 @@ function renderBettingLadders(){
         <td class="${edgeCls}">${edge===null?'—':(edge>=0?'+':'')+fmt(edge*100,1)+'pp'}</td>
       </tr>`;
     }).join('');
+    const outNote = (proj && proj.outContext) ? ` <span class="small-muted">(teammate(s) Out -- ${proj.outContext.names.join(', ')} -- ${proj.outContext.shareText} of their production redistributed in)</span>` : '';
     const header = player
-      ? `${player.n} <span class="small-muted">(${player.t}, ${player.pos})</span> ${injuryBadgeShort(player)} — proj ${fmt(statVal,1)} ${BETTING_MARKET_LABEL[market].toLowerCase()} ${oppRankBadge(oppAbbr, player.pos)}`
+      ? `${player.n} <span class="small-muted">(${player.t}, ${player.pos})</span> ${injuryBadgeShort(player)} — proj ${fmt(statVal,1)} ${BETTING_MARKET_LABEL[market].toLowerCase()} ${oppRankBadge(oppAbbr, player.pos)}${outNote}`
       : `${sbName} <span class="small-muted">(not in this tool's player database — raw Sportsbet odds shown, no projection/edge)</span>`;
     return `<div class="panel" style="margin-top:10px">
       <div style="margin-bottom:6px">${header}</div>
