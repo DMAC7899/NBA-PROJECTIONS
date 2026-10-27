@@ -99,6 +99,7 @@ nav.subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
   <button data-tab="team">Team Roster</button>
   <button data-tab="dvp">Defensive Profile</button>
   <button data-tab="today">Slate Finder</button>
+  <button data-tab="betting">Betting</button>
 </nav>
 
 <main>
@@ -210,6 +211,40 @@ nav.subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
     </div>
     <div id="histOut"></div>
   </div>
+</section>
+
+<section id="tab-betting" class="hidden">
+  <div class="panel">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div class="small-muted">Live player-prop odds ladders from <a href="https://www.sportsbet.com.au" target="_blank" rel="noopener">sportsbet.com.au</a> (Australia/Melbourne odds). bet365.com could not be included -- see Methodology. For entertainment/research only, not betting advice.</div>
+      <div id="bettingAsOf" class="small-muted" style="white-space:nowrap"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 style="margin-top:0">Best Plays Today</h2>
+    <div class="small-muted" style="margin-bottom:8px">Ranked by the gap between this tool's own matchup-adjusted projection (already factoring in the opponent's real defense-vs-position) and the probability implied by Sportsbet's odds. This is a highlight on top of the full data, not a replacement for it -- every player and every line Sportsbet publishes is in the ladders below. Caveat: projections are built from last season's real per-game baseline plus matchup adjustments, not live in-season role changes (except for the 6 rookies and the small DvP blend described in Methodology) -- a very large edge can mean the market has priced in a 2026-27 role change (more/less minutes, a new team, a return from injury) that this tool's baseline hasn't caught up to yet, not necessarily a mispriced line. Treat big edges as a prompt to check the player's current role, not as a tip.</div>
+    <div id="bestPlaysOut"></div>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <div class="field">
+        <label>Game</label>
+        <select id="bettingGameSelect"></select>
+      </div>
+      <div class="field">
+        <label>Market</label>
+        <select id="bettingMarketSelect">
+          <option value="pts">Points</option>
+          <option value="reb">Rebounds</option>
+          <option value="ast">Assists</option>
+          <option value="tpm">Threes</option>
+        </select>
+      </div>
+    </div>
+  </div>
+  <div id="bettingLaddersOut"></div>
 </section>
 
 </main>
@@ -1375,6 +1410,180 @@ histTeamSelect.value = TEAM_ORDER[0];
 populateHistPlayers();
 populateHistOpp();
 renderHistory();
+
+
+// ===== BETTING TAB (added Oct 27 2026 -- see Methodology) =====
+const BETTING_SLATE = {"asOf":"2026-10-27T21:40:00+11:00","source":"sportsbet.com.au","note":"Player-prop odds ladders scraped from sportsbet.com.au for the 2026-10-27 (Australia/Melbourne) NBA slate. bet365.com could not be included (blocked at the platform tool level by a safety restriction, not a geo-block). Only Points/Rebounds/Assists/Threes were pulled, matching this tool's own projected stat fields -- Blocks and Steals ladders exist on Sportsbet but weren't scraped. The Nets @ Celtics match page was showing a 'Live' status at scrape time, so those odds reflect the in-progress game rather than a pre-game line.","games":[{"awayAbbr":"SAC","homeAbbr":"SAS","date":"2026-10-27","live":false,"url":"https://www.sportsbet.com.au/betting/basketball-us/nba/sacramento-kings-at-san-antonio-spurs-11094881","props":{"pts":{"Victor Wembanyama":[[15,1.02],[18,1.08],[19,1.11],[20,1.14],[21,1.22],[22,1.3],[23,1.36],[24,1.45],[25,1.58],[26,1.72],[27,1.89],[28,2.08],[29,2.25],[30,2.6],[31,2.9],[32,3.2],[33,3.6],[34,4.4],[35,5.2],[36,5.8],[37,6.5],[38,7.5],[40,9.0],[45,21.0]],"Zach LaVine":[[10,1.02],[12,1.06],[13,1.08],[14,1.13],[15,1.16],[16,1.24],[17,1.3],[18,1.4],[19,1.5],[20,1.68],[21,1.8],[22,2.02],[23,2.15],[24,2.45],[25,2.75],[26,3.1],[27,3.6],[28,4.1],[29,4.6],[30,5.4],[31,5.8],[32,7.0],[35,9.0],[40,21.0],[45,41.0]],"Darius Acuff":[[10,1.03],[12,1.08],[13,1.12],[14,1.16],[15,1.25],[16,1.32],[17,1.4],[18,1.52],[19,1.68],[20,1.8],[21,2.02],[22,2.2],[23,2.5],[24,2.8],[25,3.2],[26,3.6],[27,4.1],[28,5.0],[29,5.5],[30,6.5],[31,7.5],[35,10.0],[40,34.0],[45,41.0]],"Dylan Harper":[[10,1.06],[11,1.1],[12,1.13],[13,1.22],[14,1.3],[15,1.4],[16,1.56],[17,1.74],[18,1.96],[19,2.15],[20,2.6],[21,2.9],[22,3.4],[23,4.1],[24,5.0],[25,5.5],[26,6.5],[30,10.0],[35,34.0],[40,41.0],[45,41.0]],"Stephon Castle":[[10,1.06],[11,1.1],[12,1.13],[13,1.22],[14,1.3],[15,1.4],[16,1.56],[17,1.76],[18,1.96],[19,2.2],[20,2.6],[21,2.9],[22,3.4],[23,4.1],[24,5.0],[25,5.5],[26,6.5],[30,10.0],[35,34.0],[40,41.0],[45,41.0]],"De'Aaron Fox":[[9,1.07],[10,1.11],[11,1.16],[12,1.25],[13,1.36],[14,1.5],[15,1.68],[16,1.86],[17,2.1],[18,2.4],[19,2.75],[20,3.2],[21,3.8],[22,4.6],[23,5.4],[24,6.5],[25,7.5],[30,14.0],[35,41.0],[40,41.0],[45,41.0]],"Domantas Sabonis":[[9,1.08],[10,1.12],[11,1.18],[12,1.27],[13,1.36],[14,1.5],[15,1.68],[16,1.88],[17,2.1],[18,2.45],[19,2.8],[20,3.2],[21,3.8],[22,4.6],[23,5.5],[24,6.5],[25,7.5],[30,14.0],[35,41.0],[40,41.0],[45,41.0]],"Devin Vassell":[[5,1.04],[6,1.08],[7,1.13],[8,1.2],[9,1.32],[10,1.45],[11,1.64],[12,1.88],[13,2.1],[14,2.5],[15,2.9],[16,3.6],[17,4.4],[18,5.2],[19,5.8],[20,7.5],[25,21.0],[35,41.0],[40,41.0],[45,41.0]],"Keldon Johnson":[[5,1.06],[6,1.11],[7,1.18],[8,1.27],[9,1.4],[10,1.58],[11,1.8],[12,2.08],[13,2.45],[14,2.9],[15,3.4],[16,4.1],[17,5.2],[18,5.8],[19,7.0],[20,8.5],[25,21.0],[35,41.0],[40,41.0],[45,41.0]],"Precious Achiuwa":[[5,1.07],[6,1.12],[7,1.2],[8,1.3],[9,1.45],[10,1.64],[11,1.9],[12,2.15],[13,2.6],[14,3.1],[15,3.6],[16,4.6],[17,5.5],[18,6.5],[20,9.0],[35,41.0],[40,41.0],[45,41.0]],"Julian Champagnie":[[4,1.08],[5,1.1],[6,1.22],[7,1.36],[8,1.45],[9,1.68],[10,1.96],[11,2.25],[12,2.75],[13,3.2],[14,3.8],[15,5.0],[16,5.8],[17,7.0],[20,10.0],[35,41.0],[40,41.0],[45,41.0]],"De'Andre Hunter":[[4,1.06],[5,1.1],[6,1.2],[7,1.3],[8,1.5],[9,1.72],[10,2.0],[11,2.3],[12,2.75],[13,3.2],[14,4.1],[15,5.2],[16,5.8],[17,7.5],[20,10.0],[35,41.0],[40,41.0],[45,41.0]]},"reb":{"Domantas Sabonis":[[8,1.07],[10,1.18],[12,1.5],[14,2.15],[16,3.6]],"Victor Wembanyama":[[6,1.02],[8,1.12],[10,1.32],[12,2.0],[14,3.2],[16,6.5]],"Precious Achiuwa":[[4,1.03],[6,1.22],[8,1.8],[10,2.75],[12,5.4],[14,9.0],[16,21.0]],"Stephon Castle":[[4,1.25],[6,2.15],[8,5.2],[10,10.0],[16,41.0]],"Keldon Johnson":[[4,1.38],[6,2.6],[8,6.5],[10,10.0],[16,41.0]],"Dylan Harper":[[4,1.32],[6,2.6],[8,6.5],[10,12.0],[16,41.0]],"Julian Champagnie":[[4,1.38],[6,2.75],[8,6.5],[10,13.0],[16,41.0]],"De'Andre Hunter":[[4,1.5],[6,3.2],[8,8.0],[10,14.0],[16,41.0]],"Devin Vassell":[[4,1.89],[6,5.2],[8,12.0],[16,41.0]],"De'Aaron Fox":[[4,1.93],[6,5.2],[8,12.0],[16,41.0]],"Zach LaVine":[[4,2.15],[6,6.5],[8,15.0],[16,41.0]],"Darius Acuff":[[4,2.75],[6,8.5],[16,41.0]]},"ast":{"Domantas Sabonis":[[4,1.12],[6,1.64],[8,3.1],[10,5.8],[12,10.0],[14,41.0]],"Stephon Castle":[[4,1.08],[6,1.5],[8,2.9],[10,5.8],[12,12.0],[14,41.0]],"De'Aaron Fox":[[4,1.1],[6,1.64],[8,3.2],[10,6.5],[12,13.0],[14,41.0]],"Darius Acuff":[[2,1.04],[4,1.45],[6,2.9],[8,7.5],[10,13.0],[14,41.0]],"Dylan Harper":[[2,1.03],[4,1.48],[6,3.2],[8,8.5],[10,26.0],[14,41.0]],"Victor Wembanyama":[[2,1.2],[4,2.75],[6,8.5],[14,41.0]],"Zach LaVine":[[2,1.27],[4,3.1],[6,9.0],[14,41.0]],"Devin Vassell":[[2,1.3],[4,3.4],[6,10.0],[14,41.0]]},"tpm":{"Zach LaVine":[[1,1.04],[2,1.28],[3,1.91],[4,3.25],[5,6.0],[6,11.0],[7,23.0]],"Darius Acuff":[[1,1.07],[2,1.41],[3,2.2],[4,4.0],[5,8.0],[6,15.0]],"Julian Champagnie":[[1,1.08],[2,1.49],[3,2.5],[4,4.9],[5,11.0],[6,23.0]],"Devin Vassell":[[1,1.08],[2,1.51],[3,2.55],[4,5.2],[5,11.5],[6,26.0]],"Victor Wembanyama":[[1,1.12],[2,1.68],[3,3.2],[4,7.25],[5,17.0]],"Stephon Castle":[[1,1.17],[2,1.89],[3,3.9],[4,9.0],[5,23.0]],"De'Aaron Fox":[[1,1.18],[2,1.97],[3,4.1],[4,10.0],[5,23.0]],"De'Andre Hunter":[[1,1.23],[2,2.15],[3,4.6],[4,11.5]],"Dylan Harper":[[1,1.23],[2,2.25],[3,5.1],[4,13.0]]}}},{"awayAbbr":"BKN","homeAbbr":"BOS","date":"2026-10-27","live":true,"url":"https://www.sportsbet.com.au/betting/basketball-us/nba/brooklyn-nets-at-boston-celtics-11094884","props":{"pts":{"Jayson Tatum":[[15,1.03],[17,1.07],[18,1.1],[19,1.13],[20,1.16],[21,1.25],[22,1.3],[23,1.4],[24,1.5],[25,1.64],[26,1.8],[27,2.0],[28,2.15],[29,2.45],[30,2.75],[31,3.2],[32,3.6],[33,4.4],[34,5.2],[35,5.5],[36,6.5],[37,7.5],[40,10.0],[45,26.0]],"Michael Porter Jr.":[[10,1.02],[13,1.08],[14,1.12],[15,1.16],[16,1.22],[17,1.3],[18,1.4],[19,1.5],[20,1.64],[21,1.8],[22,1.96],[23,2.15],[24,2.45],[25,2.75],[26,3.1],[27,3.6],[28,3.8],[29,4.6],[30,5.2],[31,5.8],[32,6.5],[35,9.0],[40,18.0],[45,41.0]],"Paul George":[[10,1.05],[11,1.08],[12,1.12],[13,1.16],[14,1.25],[15,1.32],[16,1.44],[17,1.58],[18,1.76],[19,1.96],[20,2.15],[21,2.5],[22,2.9],[23,3.2],[24,3.8],[25,4.6],[26,5.2],[27,5.8],[28,6.5],[30,8.5],[35,18.0],[40,41.0],[45,41.0]],"Julius Randle":[[10,1.04],[11,1.07],[12,1.11],[13,1.16],[14,1.24],[15,1.32],[16,1.44],[17,1.58],[18,1.76],[19,1.96],[20,2.15],[21,2.5],[22,2.8],[23,3.2],[24,3.8],[25,4.6],[26,5.2],[27,5.8],[28,7.0],[30,9.0],[35,21.0],[40,41.0],[45,41.0]],"Payton Pritchard":[[5,1.01],[9,1.08],[10,1.12],[11,1.18],[12,1.25],[13,1.36],[14,1.48],[15,1.64],[16,1.8],[17,2.05],[18,2.25],[19,2.6],[20,3.1],[21,3.4],[22,4.1],[23,5.0],[24,5.5],[25,6.5],[30,12.0],[35,41.0],[40,41.0],[45,41.0]],"Derrick White":[[5,1.01],[9,1.1],[10,1.13],[11,1.22],[12,1.3],[13,1.44],[14,1.58],[15,1.78],[16,2.02],[17,2.25],[18,2.6],[19,3.1],[20,3.6],[21,4.4],[22,5.2],[23,5.8],[24,7.0],[25,8.0],[30,18.0],[35,41.0],[40,41.0],[45,41.0]],"Egor Demin":[[5,1.08],[6,1.16],[7,1.25],[8,1.38],[9,1.58],[10,1.8],[11,2.08],[12,2.4],[13,2.8],[14,3.2],[15,4.1],[16,5.2],[17,5.8],[18,7.0],[20,9.0],[35,41.0],[40,41.0],[45,41.0]],"Day'Ron Sharpe":[[4,1.06],[5,1.12],[6,1.22],[7,1.36],[8,1.56],[9,1.8],[10,2.1],[11,2.6],[12,3.1],[13,3.8],[14,4.6],[15,5.8],[16,7.0],[20,13.0],[35,41.0],[40,41.0],[45,41.0]],"Neemias Queta":[[4,1.08],[5,1.14],[6,1.25],[7,1.4],[8,1.64],[9,1.89],[10,2.2],[11,2.6],[12,3.2],[13,3.8],[14,5.2],[15,5.8],[16,7.5],[20,13.0],[35,41.0],[40,41.0],[45,41.0]],"Sam Hauser":[[3,1.07],[4,1.22],[5,1.22],[6,1.4],[7,1.72],[8,1.85],[9,2.15],[10,2.75],[11,3.1],[12,3.8],[13,5.2],[14,5.5],[15,7.0],[20,14.0],[35,41.0],[40,41.0],[45,41.0]],"Noah Clowney":[[3,1.08],[4,1.16],[5,1.25],[6,1.45],[7,1.68],[8,2.0],[9,2.4],[10,2.9],[11,3.6],[12,4.6],[13,5.5],[14,6.5],[15,8.0],[35,41.0],[40,41.0],[45,41.0]],"Keon Ellis":[[3,1.08],[4,1.16],[5,1.22],[6,1.44],[7,1.68],[8,1.96],[9,2.3],[10,2.9],[11,3.6],[12,4.6],[13,5.4],[15,8.0],[35,41.0],[40,41.0],[45,41.0]],"Mitchell Robinson":[[5,1.45],[10,4.4],[15,12.0],[35,41.0],[40,41.0],[45,41.0]],"Jordan Walsh":[[5,2.4],[10,10.0],[35,41.0],[40,41.0],[45,41.0]]},"reb":{"Jayson Tatum":[[6,1.13],[8,1.58],[10,2.4],[12,5.0],[14,9.0],[16,26.0]],"Day'Ron Sharpe":[[4,1.04],[6,1.3],[8,1.96],[10,3.2],[12,6.5],[14,10.0],[16,26.0]],"Mitchell Robinson":[[4,1.08],[6,1.36],[8,2.15],[10,3.6],[12,7.5],[14,12.0],[16,34.0]],"Neemias Queta":[[4,1.11],[6,1.52],[8,2.6],[10,4.6],[12,8.5],[14,15.0],[16,41.0]],"Julius Randle":[[4,1.1],[6,1.52],[8,2.9],[10,5.4],[12,10.0],[14,34.0],[16,41.0]],"Michael Porter Jr.":[[4,1.16],[6,1.91],[8,3.8],[10,8.0],[12,14.0],[16,41.0]],"Paul George":[[4,1.44],[6,2.9],[8,7.5],[10,14.0],[16,41.0]],"Derrick White":[[4,1.8],[6,5.0],[8,12.0],[16,41.0]],"Noah Clowney":[[4,2.05],[6,5.4],[8,12.0],[16,41.0]],"Jordan Walsh":[[4,2.15],[6,5.5],[8,12.0],[16,41.0]],"Egor Demin":[[4,2.5],[6,7.5],[16,41.0]],"Payton Pritchard":[[4,2.6],[6,8.0],[16,41.0]],"Sam Hauser":[[4,2.75],[6,8.0],[16,41.0]]},"ast":{"Jayson Tatum":[[4,1.08],[6,1.5],[8,2.9],[10,5.8],[12,12.0],[14,41.0]],"Derrick White":[[4,1.22],[6,2.15],[8,5.2],[10,9.0],[12,34.0],[14,41.0]],"Payton Pritchard":[[2,1.04],[4,1.44],[6,2.8],[8,6.5],[10,12.0],[12,34.0],[14,41.0]],"Julius Randle":[[2,1.02],[4,1.36],[6,2.75],[8,7.0],[10,13.0],[14,41.0]],"Egor Demin":[[2,1.13],[4,2.15],[6,6.5],[8,15.0],[14,41.0]],"Paul George":[[2,1.16],[4,2.5],[6,8.0],[14,41.0]],"Day'Ron Sharpe":[[2,1.3],[4,3.4],[6,10.0],[14,41.0]],"Keon Ellis":[[2,1.6],[4,5.5],[6,21.0],[14,41.0]],"Michael Porter Jr.":[[2,1.78],[4,7.0],[14,41.0]]},"tpm":{"Michael Porter Jr.":[[1,1.03],[2,1.2],[3,1.65],[4,2.6],[5,4.5],[6,8.0],[7,15.0],[8,34.0]],"Jayson Tatum":[[1,1.02],[2,1.16],[3,1.57],[4,2.5],[5,4.4],[6,8.5],[7,17.0],[8,41.0]],"Paul George":[[1,1.02],[2,1.18],[3,1.62],[4,2.55],[5,4.6],[6,9.0],[7,20.0]],"Payton Pritchard":[[1,1.04],[2,1.25],[3,1.81],[4,3.0],[5,5.7],[6,11.0],[7,23.0]],"Derrick White":[[1,1.04],[2,1.27],[3,1.9],[4,3.4],[5,6.5],[6,14.0],[7,34.0]],"Sam Hauser":[[1,1.11],[2,1.57],[3,2.7],[4,5.4],[5,11.5],[6,26.0]],"Egor Demin":[[1,1.12],[2,1.65],[3,2.9],[4,6.0],[5,14.0]],"Keon Ellis":[[1,1.27],[2,2.35],[3,5.4],[4,13.0]],"Julius Randle":[[1,1.28],[2,2.4],[3,5.5],[4,14.0]],"Noah Clowney":[[1,1.33],[2,2.5],[3,5.9],[4,15.0]]}}},{"awayAbbr":"DET","homeAbbr":"NYK","date":"2026-10-27","live":false,"url":"https://www.sportsbet.com.au/betting/basketball-us/nba/detroit-pistons-at-new-york-knicks-11094882","props":{"pts":{"Jalen Brunson":[[15,1.04],[16,1.06],[17,1.08],[18,1.12],[19,1.16],[20,1.24],[21,1.3],[22,1.4],[23,1.5],[24,1.64],[25,1.8],[26,2.0],[27,2.15],[28,2.45],[29,2.75],[30,3.2],[31,3.6],[32,4.1],[33,5.0],[34,5.5],[35,6.5],[36,7.5],[40,10.0],[45,34.0]],"Cade Cunningham":[[10,1.01],[14,1.06],[15,1.1],[16,1.13],[17,1.16],[18,1.24],[19,1.3],[20,1.4],[21,1.5],[22,1.64],[23,1.8],[24,1.96],[25,2.15],[26,2.45],[27,2.75],[28,3.1],[29,3.6],[30,4.1],[31,5.0],[32,5.5],[33,6.5],[34,7.5],[35,8.0],[40,14.0],[45,41.0]],"Karl-Anthony Towns":[[10,1.02],[12,1.07],[13,1.1],[14,1.14],[15,1.22],[16,1.3],[17,1.4],[18,1.52],[19,1.72],[20,1.9],[21,2.1],[22,2.45],[23,2.75],[24,3.2],[25,3.6],[26,4.4],[27,5.2],[28,5.8],[29,6.5],[30,7.5],[35,13.0],[40,41.0],[45,41.0]],"OG Anunoby":[[5,1.01],[9,1.06],[10,1.1],[11,1.13],[12,1.2],[13,1.3],[14,1.4],[15,1.52],[16,1.72],[17,1.96],[18,2.15],[19,2.5],[20,2.9],[21,3.4],[22,4.1],[23,4.6],[24,5.5],[25,6.5],[30,12.0],[35,41.0],[40,41.0],[45,41.0]],"John Collins":[[5,1.01],[8,1.06],[9,1.1],[10,1.14],[11,1.22],[12,1.3],[13,1.44],[14,1.58],[15,1.78],[16,2.0],[17,2.25],[18,2.6],[19,3.1],[20,3.6],[21,4.4],[22,5.2],[23,5.8],[24,7.0],[25,8.0],[30,21.0],[35,41.0],[40,41.0],[45,41.0]],"Duncan Robinson":[[5,1.03],[6,1.07],[7,1.12],[8,1.16],[9,1.3],[10,1.4],[11,1.52],[12,1.74],[13,2.0],[14,2.2],[15,2.6],[16,3.1],[17,3.6],[18,4.4],[19,5.2],[20,5.8],[21,7.0],[25,12.0],[30,34.0],[35,41.0],[40,41.0],[45,41.0]],"Paul Reed":[[5,1.03],[6,1.06],[7,1.1],[8,1.16],[9,1.25],[10,1.36],[11,1.52],[12,1.74],[13,1.96],[14,2.25],[15,2.75],[16,3.2],[17,3.8],[18,4.6],[19,5.8],[20,6.5],[25,14.0],[35,41.0],[40,41.0],[45,41.0]],"Mikal Bridges":[[5,1.04],[6,1.08],[7,1.13],[8,1.22],[9,1.32],[10,1.45],[11,1.68],[12,1.92],[13,2.2],[14,2.6],[15,3.1],[16,3.8],[17,4.6],[18,5.5],[19,6.5],[20,8.0],[25,26.0],[35,41.0],[40,41.0],[45,41.0]],"Josh Hart":[[5,1.04],[6,1.08],[7,1.13],[8,1.22],[9,1.32],[10,1.5],[11,1.72],[12,1.96],[13,2.25],[14,2.75],[15,3.2],[16,3.8],[17,5.0],[18,5.8],[19,7.0],[20,8.0],[25,26.0],[35,41.0],[40,41.0],[45,41.0]],"Ausar Thompson":[[5,1.1],[6,1.18],[7,1.3],[8,1.45],[9,1.68],[10,1.96],[11,2.25],[12,2.75],[13,3.2],[14,4.1],[15,5.2],[16,6.5],[20,12.0],[35,41.0],[40,41.0],[45,41.0]],"Landry Shamet":[[3,1.1],[4,1.2],[5,1.28],[6,1.5],[7,1.72],[8,1.96],[9,2.4],[10,2.9],[11,3.6],[12,4.6],[13,5.5],[14,6.5],[15,8.0],[35,41.0],[40,41.0],[45,41.0]],"Miles McBride":[[3,1.12],[4,1.3],[5,1.33],[6,1.6],[7,1.96],[8,2.2],[9,2.75],[10,3.4],[11,4.1],[12,5.4],[13,6.5],[15,9.0],[35,41.0],[40,41.0],[45,41.0]]},"reb":{"Karl-Anthony Towns":[[8,1.08],[10,1.25],[12,1.76],[14,2.75],[16,5.2]],"Paul Reed":[[4,1.02],[6,1.16],[8,1.6],[10,2.45],[12,4.6],[14,9.0],[16,18.0]],"Josh Hart":[[4,1.04],[6,1.27],[8,2.02],[10,3.2],[12,7.0],[14,12.0],[16,41.0]],"John Collins":[[4,1.05],[6,1.32],[8,2.15],[10,3.8],[12,8.0],[14,14.0],[16,41.0]],"Ausar Thompson":[[4,1.14],[6,1.8],[8,3.6],[10,7.0],[12,13.0],[16,41.0]],"Cade Cunningham":[[4,1.2],[6,2.08],[8,4.6],[10,8.5],[12,26.0],[16,41.0]],"OG Anunoby":[[4,1.27],[6,2.25],[8,5.4],[10,10.0],[16,41.0]],"Mikal Bridges":[[4,1.96],[6,5.2],[8,12.0],[16,41.0]],"Jalen Brunson":[[4,2.25],[6,6.5],[8,21.0],[16,41.0]],"Duncan Robinson":[[4,3.6],[6,10.0],[16,41.0]],"Landry Shamet":[[4,5.4],[6,15.0],[16,41.0]],"Miles McBride":[[4,5.5],[16,41.0]]},"ast":{"Cade Cunningham":[[6,1.13],[8,1.58],[10,2.5],[12,5.2],[14,9.0]],"Jalen Brunson":[[4,1.13],[6,1.74],[8,3.6],[10,8.0],[12,18.0],[14,41.0]],"Josh Hart":[[2,1.06],[4,1.64],[6,4.1],[8,10.0],[10,31.0],[14,41.0]],"Ausar Thompson":[[2,1.08],[4,1.78],[6,4.4],[8,10.0],[10,31.0],[14,41.0]],"Karl-Anthony Towns":[[2,1.1],[4,2.02],[6,5.5],[8,13.0],[14,41.0]],"Mikal Bridges":[[2,1.2],[4,2.75],[6,8.0],[14,41.0]],"Paul Reed":[[2,1.45],[4,4.6],[6,12.0],[14,41.0]],"Duncan Robinson":[[2,1.64],[4,5.5],[6,18.0],[14,41.0]],"OG Anunoby":[[2,1.52],[4,5.4],[6,21.0],[14,41.0]],"Miles McBride":[[2,1.8],[4,6.5],[14,41.0]],"John Collins":[[2,2.08],[4,8.5],[14,41.0]],"Landry Shamet":[[2,2.15],[4,8.5],[14,41.0]]},"tpm":{"Duncan Robinson":[[1,1.03],[2,1.21],[3,1.69],[4,2.7],[5,4.8],[6,9.0],[7,18.0],[8,41.0]],"OG Anunoby":[[1,1.07],[2,1.4],[3,2.2],[4,4.3],[5,8.5],[6,18.0]],"Jalen Brunson":[[1,1.08],[2,1.52],[3,2.65],[4,5.5],[5,12.5],[6,26.0]],"Cade Cunningham":[[1,1.1],[2,1.6],[3,2.8],[4,5.8],[5,13.0],[6,31.0]],"Miles McBride":[[1,1.21],[2,2.05],[3,4.2],[4,9.75],[5,23.0]],"John Collins":[[1,1.21],[2,2.05],[3,4.3],[4,10.0],[5,26.0]],"Landry Shamet":[[1,1.22],[2,2.12],[3,4.4],[4,10.0],[5,26.0]],"Mikal Bridges":[[1,1.22],[2,2.1],[3,4.6],[4,11.5]],"Josh Hart":[[1,1.21],[2,2.12],[3,4.6],[4,12.0]],"Karl-Anthony Towns":[[1,1.23],[2,2.2],[3,5.0],[4,13.0]]}}},{"awayAbbr":"POR","homeAbbr":"LAL","date":"2026-10-27","live":false,"url":"https://www.sportsbet.com.au/betting/basketball-us/nba/portland-trail-blazers-at-los-angeles-lakers-11094883","props":{"pts":{"Luka Doncic":[[20,1.03],[22,1.06],[23,1.1],[24,1.12],[25,1.16],[26,1.2],[27,1.25],[28,1.32],[29,1.4],[30,1.5],[31,1.6],[32,1.74],[33,1.9],[34,2.08],[35,2.25],[36,2.5],[37,2.75],[38,3.1],[39,3.6],[40,3.8],[41,4.6],[45,7.5]],"Deni Avdija":[[10,1.01],[14,1.06],[15,1.1],[16,1.13],[17,1.16],[18,1.25],[19,1.32],[20,1.44],[21,1.56],[22,1.68],[23,1.86],[24,2.08],[25,2.25],[26,2.6],[27,2.9],[28,3.2],[29,3.8],[30,4.4],[31,5.2],[32,5.8],[33,6.5],[34,7.5],[35,8.0],[40,14.0],[45,41.0]],"Austin Reaves":[[10,1.01],[15,1.08],[16,1.12],[17,1.16],[18,1.22],[19,1.3],[20,1.36],[21,1.45],[22,1.6],[23,1.78],[24,1.96],[25,2.15],[26,2.45],[27,2.75],[28,3.2],[29,3.6],[30,4.4],[31,5.2],[32,5.5],[33,6.5],[34,7.5],[35,8.5],[40,14.0],[45,41.0]],"Damian Lillard":[[10,1.03],[12,1.08],[13,1.12],[14,1.16],[15,1.24],[16,1.3],[17,1.4],[18,1.52],[19,1.68],[20,1.84],[21,2.02],[22,2.2],[23,2.5],[24,2.8],[25,3.2],[26,3.6],[27,4.4],[28,5.2],[29,5.5],[30,6.5],[31,7.5],[35,12.0],[40,31.0],[45,41.0]],"Ja Morant":[[9,1.07],[10,1.1],[11,1.16],[12,1.25],[13,1.32],[14,1.45],[15,1.6],[16,1.8],[17,2.02],[18,2.25],[19,2.6],[20,2.9],[21,3.4],[22,4.1],[23,5.0],[24,5.5],[25,6.5],[30,12.0],[35,41.0],[40,41.0],[45,41.0]],"Walker Kessler":[[5,1.02],[7,1.07],[8,1.11],[9,1.18],[10,1.27],[11,1.4],[12,1.56],[13,1.76],[14,2.0],[15,2.3],[16,2.75],[17,3.2],[18,3.8],[19,5.0],[20,5.5],[21,6.5],[25,12.0],[35,41.0],[40,41.0],[45,41.0]],"Toumani Camara":[[5,1.04],[6,1.1],[7,1.14],[8,1.22],[9,1.36],[10,1.48],[11,1.68],[12,1.91],[13,2.15],[14,2.5],[15,2.9],[16,3.6],[17,4.1],[18,5.2],[19,5.8],[20,7.0],[25,13.0],[35,41.0],[40,41.0],[45,41.0]],"Collin Sexton":[[5,1.08],[6,1.13],[7,1.22],[8,1.32],[9,1.48],[10,1.68],[11,1.88],[12,2.15],[13,2.5],[14,2.9],[15,3.6],[16,4.4],[17,5.2],[18,5.8],[19,7.0],[20,8.0],[25,21.0],[35,41.0],[40,41.0],[45,41.0]],"Jrue Holiday":[[5,1.06],[6,1.13],[7,1.22],[8,1.32],[9,1.48],[10,1.68],[11,1.92],[12,2.15],[13,2.6],[14,3.1],[15,3.6],[16,4.4],[17,5.2],[18,6.5],[19,7.5],[20,8.5],[25,26.0],[35,41.0],[40,41.0],[45,41.0]],"Donovan Clingan":[[5,1.06],[6,1.11],[7,1.2],[8,1.3],[9,1.45],[10,1.68],[11,1.96],[12,2.25],[13,2.75],[14,3.2],[15,3.8],[16,5.2],[17,5.8],[18,7.0],[20,9.0],[35,41.0],[40,41.0],[45,41.0]],"Scoot Henderson":[[5,1.1],[6,1.18],[7,1.3],[8,1.4],[9,1.6],[10,1.8],[11,2.1],[12,2.45],[13,2.9],[14,3.4],[15,4.4],[16,5.2],[17,5.8],[18,7.5],[20,9.0],[35,41.0],[40,41.0],[45,41.0]],"Quentin Grimes":[[4,1.08],[5,1.14],[6,1.25],[7,1.38],[8,1.58],[9,1.8],[10,2.08],[11,2.45],[12,2.9],[13,3.6],[14,4.4],[15,5.2],[16,6.5],[17,7.5],[20,10.0],[35,41.0],[40,41.0],[45,41.0]],"Ziaire Williams":[[4,1.07],[5,1.12],[6,1.25],[7,1.36],[8,1.58],[9,1.8],[10,2.1],[11,2.5],[12,3.1],[13,3.6],[14,4.6],[15,5.5],[16,7.0],[20,13.0],[35,41.0],[40,41.0],[45,41.0]],"Sandro Mamukelashvili":[[3,1.08],[4,1.13],[5,1.22],[6,1.36],[7,1.56],[8,1.8],[9,2.1],[10,2.5],[11,3.1],[12,3.6],[13,4.6],[14,5.8],[15,7.0],[20,15.0],[35,41.0],[40,41.0],[45,41.0]],"Matisse Thybulle":[[2,1.1],[3,1.16],[4,1.48],[5,1.53],[6,1.8],[7,2.5],[8,2.75],[9,3.6],[10,5.2],[11,5.8],[12,7.0],[15,12.0],[35,41.0],[40,41.0],[45,41.0]],"Robert Williams":[[5,1.5],[10,4.4],[15,12.0],[35,41.0],[40,41.0],[45,41.0]]},"reb":{"Walker Kessler":[[6,1.04],[8,1.24],[10,1.6],[12,2.6],[14,5.2],[16,9.0]],"Donovan Clingan":[[6,1.08],[8,1.32],[10,1.86],[12,3.2],[14,5.8],[16,10.0]],"Luka Doncic":[[4,1.03],[6,1.24],[8,1.9],[10,2.9],[12,6.5],[14,12.0],[16,34.0]],"Robert Williams":[[4,1.13],[6,1.56],[8,2.6],[10,4.6],[12,8.5],[14,13.0],[16,34.0]],"Deni Avdija":[[4,1.07],[6,1.4],[8,2.45],[10,4.6],[12,9.0],[14,26.0],[16,41.0]],"Sandro Mamukelashvili":[[4,1.5],[6,3.1],[8,7.5],[10,12.0],[16,41.0]],"Austin Reaves":[[4,1.52],[6,3.4],[8,8.5],[10,26.0],[16,41.0]],"Toumani Camara":[[4,1.58],[6,3.6],[8,9.0],[10,26.0],[16,41.0]],"Damian Lillard":[[4,1.92],[6,5.2],[8,12.0],[16,41.0]],"Quentin Grimes":[[4,2.1],[6,5.8],[8,12.0],[16,41.0]],"Jrue Holiday":[[4,2.1],[6,5.8],[8,13.0],[16,41.0]],"Ja Morant":[[4,2.4],[6,6.5],[8,18.0],[16,41.0]],"Ziaire Williams":[[4,2.6],[6,8.0],[16,41.0]],"Matisse Thybulle":[[4,3.4],[6,10.0],[16,41.0]]},"ast":{"Luka Doncic":[[4,1.02],[6,1.22],[8,1.89],[10,3.2],[12,7.0],[14,13.0]],"Ja Morant":[[4,1.12],[6,1.64],[8,3.2],[10,6.5],[12,12.0],[14,41.0]],"Austin Reaves":[[4,1.16],[6,1.9],[8,4.4],[10,9.0],[12,26.0],[14,41.0]],"Deni Avdija":[[4,1.27],[6,2.2],[8,5.5],[10,10.0],[14,41.0]],"Damian Lillard":[[2,1.02],[4,1.36],[6,2.75],[8,6.5],[10,13.0],[14,41.0]],"Jrue Holiday":[[2,1.1],[4,1.89],[6,4.6],[8,10.0],[14,41.0]],"Quentin Grimes":[[2,1.44],[4,4.1],[6,12.0],[14,41.0]],"Walker Kessler":[[2,1.8],[4,7.5],[14,41.0]]},"tpm":{"Luka Doncic":[[1,1.01],[2,1.09],[3,1.34],[4,1.89],[5,3.0],[6,5.0],[7,9.5],[8,18.0],[9,46.0]],"Damian Lillard":[[1,1.02],[2,1.17],[3,1.58],[4,2.45],[5,4.3],[6,8.0],[7,15.0],[8,31.0]],"Toumani Camara":[[1,1.06],[2,1.36],[3,2.12],[4,3.9],[5,8.0],[6,17.0]],"Austin Reaves":[[1,1.08],[2,1.46],[3,2.4],[4,4.75],[5,10.5],[6,23.0]],"Jrue Holiday":[[1,1.16],[2,1.82],[3,3.5],[4,7.75],[5,18.0]],"Deni Avdija":[[1,1.18],[2,1.9],[3,3.75],[4,8.75],[5,21.0]],"Matisse Thybulle":[[1,1.21],[2,2.05],[3,4.3],[4,10.0],[5,23.0]],"Ja Morant":[[1,1.24],[2,2.18],[3,4.6],[4,11.5]],"Quentin Grimes":[[1,1.28],[2,2.3],[3,5.1],[4,13.0]],"Scoot Henderson":[[1,1.3],[2,2.5],[3,5.5],[4,14.0]],"Ziaire Williams":[[1,1.28],[2,2.35],[3,5.6],[4,14.0]],"Collin Sexton":[[1,1.38],[2,2.7],[3,6.75],[4,17.0]],"Sandro Mamukelashvili":[[1,1.49],[2,3.3]]}}}]};
+
+// Market key (as scraped from Sportsbet) -> this tool's own projected-stat field name.
+const BETTING_MARKET_STAT = {pts:'pts', reb:'trb', ast:'ast', tpm:'tpm'};
+const BETTING_MARKET_LABEL = {pts:'Points', reb:'Rebounds', ast:'Assists', tpm:'Threes'};
+// Rough coefficient-of-variation per stat (sd as a fraction of the mean), used only to turn a
+// projected mean into a over/under probability for a specific Sportsbet line. These are generic
+// game-to-game volatility estimates for an NBA player's box-score stats, not fit to this specific
+// player -- good enough to rank "where's the edge", not a claim of statistical precision.
+const BETTING_STAT_CV = {pts:0.32, trb:0.38, ast:0.42, tpm:0.62};
+
+// Standard normal CDF via the Abramowitz-Stegun erf approximation (good to ~1e-7).
+function erf(x){
+  const sign = x < 0 ? -1 : 1; x = Math.abs(x);
+  const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  const t = 1/(1+p*x);
+  const y = 1 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+  return sign*y;
+}
+function normCdf(z){ return 0.5*(1+erf(z/Math.SQRT2)); }
+
+// P(stat >= line) given a projected mean, using a normal approximation with a continuity
+// correction (since "line+" on Sportsbet means "line or more", a discrete count).
+function probOverLine(mean, line, statKey){
+  const cv = BETTING_STAT_CV[statKey] || 0.4;
+  const sd = Math.max(mean*cv, statKey==='pts' ? 2.5 : 1.0);
+  const z = (line - 0.5 - mean) / sd;
+  const p = 1 - normCdf(z);
+  return Math.max(0.01, Math.min(0.99, p));
+}
+
+// Strips accents/diacritics, periods, apostrophes and casing so small spelling differences
+// between Sportsbet's player names and this tool's own roster don't block a match.
+function normName(s){
+  return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+}
+function findPlayerInGame(game, sbName){
+  const teams = [game.awayAbbr, game.homeAbbr];
+  const target = normName(sbName);
+  let candidates = PLAYERS.filter(p=> teams.includes(p.t));
+  let hit = candidates.find(p=> normName(p.n)===target);
+  if(hit) return hit;
+  // fall back to a loose "starts with" match in case one side carries an extra suffix the other lacks
+  hit = candidates.find(p=> normName(p.n).startsWith(target) || target.startsWith(normName(p.n)));
+  return hit || null;
+}
+
+// Builds the real schedule-game object (with its real restDays/b2b) for this player on this date,
+// so betting projections run through the exact same computeProjection() as every other tab.
+function bettingGameFor(player, bGame){
+  const sch = TEAMS[player.t] && TEAMS[player.t].sch.find(g=>g.date===bGame.date);
+  return sch || null;
+}
+
+function bettingProjFor(player, bGame){
+  const g = bettingGameFor(player, bGame);
+  if(!g) return null;
+  return computeProjection(player, g, player.t);
+}
+
+// Flattens the full BETTING_SLATE into one row per (game, market, player, line) -- this is the
+// complete dataset every Sportsbet line rolls up into; nothing is dropped here, only the
+// "Best Plays" view below filters/sorts a copy of it for display.
+function bettingAllRows(){
+  const rows = [];
+  BETTING_SLATE.games.forEach((bGame, gameIdx)=>{
+    Object.entries(bGame.props).forEach(([market, players])=>{
+      const statKey = BETTING_MARKET_STAT[market];
+      Object.entries(players).forEach(([sbName, rungs])=>{
+        const player = findPlayerInGame(bGame, sbName);
+        const proj = player ? bettingProjFor(player, bGame) : null;
+        const statVal = proj ? proj[statKey] : null;
+        rungs.forEach(([line, odds])=>{
+          const impliedProb = 1/odds;
+          const ourProb = statVal!==null ? probOverLine(statVal, line, statKey) : null;
+          const edge = ourProb!==null ? ourProb - impliedProb : null;
+          rows.push({gameIdx, bGame, market, statKey, sbName, player, proj, statVal, line, odds, impliedProb, ourProb, edge});
+        });
+      });
+    });
+  });
+  return rows;
+}
+
+function pctStr(p){ return p===null||p===undefined ? '—' : fmt(p*100,0)+'%'; }
+
+function bettingMatchupLabel(bGame){
+  const away = TEAMS[bGame.awayAbbr] ? TEAMS[bGame.awayAbbr].name : bGame.awayAbbr;
+  const home = TEAMS[bGame.homeAbbr] ? TEAMS[bGame.homeAbbr].name : bGame.homeAbbr;
+  return `${away} @ ${home}`;
+}
+
+// ---------- BEST PLAYS (additive ranking on top of the full dataset below -- never a substitute) ----------
+function renderBestPlays(){
+  const rows = bettingAllRows().filter(r=> r.edge!==null);
+  rows.sort((a,b)=> b.edge - a.edge);
+  const top = rows.filter(r=> r.edge >= 0.05 && r.odds >= 1.25 && r.odds <= 15).slice(0, 20);
+  if(!top.length){
+    document.getElementById('bestPlaysOut').innerHTML = '<div class="small-muted">No standout edges found in the current slate/odds.</div>';
+    return;
+  }
+  const bodyRows = top.map(r=>{
+    const edgeCls = r.edge >= 0.12 ? 'edge-pos' : (r.edge >= 0.05 ? 'edge-flat' : 'edge-neg');
+    return `<tr>
+      <td class="name-cell">${r.player.n} <span class="small-muted">(${r.player.t})</span></td>
+      <td>${bettingMatchupLabel(r.bGame)}</td>
+      <td>${BETTING_MARKET_LABEL[r.market]} ${r.line}+</td>
+      <td>${oppRankBadge(r.player.t===r.bGame.homeAbbr ? r.bGame.awayAbbr : r.bGame.homeAbbr, r.player.pos)}</td>
+      <td>${fmt(r.statVal,1)}</td>
+      <td>${fmt(r.odds,2)}</td>
+      <td>${pctStr(r.impliedProb)}</td>
+      <td>${pctStr(r.ourProb)}</td>
+      <td class="${edgeCls}">+${fmt(r.edge*100,1)}pp</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('bestPlaysOut').innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th class="name-cell">Player</th><th>Game</th><th>Market</th><th>Opp Rk vPos</th><th>Our Proj</th><th>Odds</th><th>Implied%</th><th>Our Prob%</th><th>Edge</th></tr></thead>
+    <tbody>${bodyRows}</tbody>
+  </table></div>`;
+}
+
+// ---------- FULL LADDERS (every player, every line Sportsbet publishes -- the complete dataset) ----------
+const bettingGameSelect = document.getElementById('bettingGameSelect');
+const bettingMarketSelect = document.getElementById('bettingMarketSelect');
+function populateBettingGameSelect(){
+  bettingGameSelect.innerHTML = BETTING_SLATE.games.map((g,i)=>`<option value="${i}">${bettingMatchupLabel(g)}${g.live?' (live at scrape)':''}</option>`).join('');
+}
+function renderBettingLadders(){
+  const gameIdx = parseInt(bettingGameSelect.value);
+  const market = bettingMarketSelect.value;
+  const bGame = BETTING_SLATE.games[gameIdx];
+  if(!bGame){ document.getElementById('bettingLaddersOut').innerHTML=''; return; }
+  const players = bGame.props[market] || {};
+  const statKey = BETTING_MARKET_STAT[market];
+  const blocks = Object.entries(players).map(([sbName, rungs])=>{
+    const player = findPlayerInGame(bGame, sbName);
+    const proj = player ? bettingProjFor(player, bGame) : null;
+    const statVal = proj ? proj[statKey] : null;
+    const oppAbbr = player ? (player.t===bGame.homeAbbr ? bGame.awayAbbr : bGame.homeAbbr) : null;
+    const rowsHtml = rungs.map(([line, odds])=>{
+      const impliedProb = 1/odds;
+      const ourProb = statVal!==null ? probOverLine(statVal, line, statKey) : null;
+      const edge = ourProb!==null ? ourProb - impliedProb : null;
+      const edgeCls = edge===null ? '' : (edge>=0.05 ? 'edge-pos' : (edge<=-0.05 ? 'edge-neg' : 'edge-flat'));
+      return `<tr>
+        <td>${line}+</td>
+        <td>${fmt(odds,2)}</td>
+        <td>${pctStr(impliedProb)}</td>
+        <td>${pctStr(ourProb)}</td>
+        <td class="${edgeCls}">${edge===null?'—':(edge>=0?'+':'')+fmt(edge*100,1)+'pp'}</td>
+      </tr>`;
+    }).join('');
+    const header = player
+      ? `${player.n} <span class="small-muted">(${player.t}, ${player.pos})</span> ${injuryBadgeShort(player)} — proj ${fmt(statVal,1)} ${BETTING_MARKET_LABEL[market].toLowerCase()} ${oppRankBadge(oppAbbr, player.pos)}`
+      : `${sbName} <span class="small-muted">(not in this tool's player database — raw Sportsbet odds shown, no projection/edge)</span>`;
+    return `<div class="panel" style="margin-top:10px">
+      <div style="margin-bottom:6px">${header}</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Line</th><th>Odds</th><th>Implied%</th><th>Our Prob%</th><th>Edge</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table></div>
+    </div>`;
+  }).join('');
+  document.getElementById('bettingLaddersOut').innerHTML = blocks || '<div class="small-muted">No props for this market in this game.</div>';
+}
+bettingGameSelect.addEventListener('change', renderBettingLadders);
+bettingMarketSelect.addEventListener('change', renderBettingLadders);
+populateBettingGameSelect();
+renderBettingLadders();
+renderBestPlays();
+document.getElementById('bettingAsOf').textContent = `Odds as of ${BETTING_SLATE.asOf} · ${BETTING_SLATE.source}`;
 
 </script>
 </body>
