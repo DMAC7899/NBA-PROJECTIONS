@@ -224,6 +224,12 @@ nav.subtabs button.active{color:var(--text);border-bottom-color:var(--accent2);}
   <div class="panel">
     <h2 style="margin-top:0">Best Plays Today</h2>
     <div class="small-muted" style="margin-bottom:8px">Ranked by the gap between this tool's own matchup-adjusted projection (already factoring in the opponent's real defense-vs-position) and the probability implied by Sportsbet's odds. This is a highlight on top of the full data, not a replacement for it -- every player and every line Sportsbet publishes is in the ladders below. These projections now also factor in real, currently-confirmed Out teammates automatically -- if a player's own roster has someone tagged Out (the same injury data behind the badges elsewhere in this tool), their vacated minutes/usage are redistributed into teammates' numbers here using the same model as the Player tab's "Teammates OUT" simulator (look for the "teammate(s) Out" note next to a player's projection). Caveat: outside that specific real-Out adjustment, projections are still built from last season's real per-game baseline plus matchup adjustments, not full live in-season role data (except for the 6 rookies and the small DvP blend described in Methodology) -- a very large edge can still mean the market has priced in a 2026-27 role change (a new starting job, a return from injury that is not yet reflected, a new team) that this tool's baseline has not caught up to, not necessarily a mispriced line. Treat big edges as a prompt to check the player's current role, not as a tip.</div>
+    <div class="row" style="margin-bottom:8px">
+      <div class="field">
+        <label>Scope</label>
+        <select id="bestPlaysGameSelect"></select>
+      </div>
+    </div>
     <div id="bestPlaysOut"></div>
   </div>
 
@@ -1524,9 +1530,21 @@ function bettingMatchupLabel(bGame){
 
 // ---------- BEST PLAYS (additive ranking on top of the full dataset below -- never a substitute) ----------
 function renderBestPlays(){
-  const rows = bettingAllRows().filter(r=> r.edge!==null);
+  const scope = bestPlaysGameSelect.value;
+  const scoped = scope !== 'all' && scope !== '' && scope !== undefined;
+  let rows = bettingAllRows().filter(r=> r.edge!==null);
+  if(scoped) rows = rows.filter(r=> String(r.gameIdx) === scope);
   rows.sort((a,b)=> b.edge - a.edge);
-  const top = rows.filter(r=> r.edge >= 0.05 && r.odds >= 1.25 && r.odds <= 15).slice(0, 20);
+  const limit = scoped ? 15 : 20;
+  let top = rows.filter(r=> r.edge >= 0.05 && r.odds >= 1.25 && r.odds <= 15).slice(0, limit);
+  // A single game has far fewer rows than the whole slate -- if nothing clears the
+  // sitewide 5pp "standout" bar, still surface the game's best available edges rather
+  // than showing an empty panel, clearly labeled as below the usual bar.
+  let belowBar = false;
+  if(scoped && !top.length && rows.length){
+    top = rows.slice(0, 10);
+    belowBar = true;
+  }
   if(!top.length){
     document.getElementById('bestPlaysOut').innerHTML = '<div class="small-muted">No standout edges found in the current slate/odds.</div>';
     return;
@@ -1542,10 +1560,11 @@ function renderBestPlays(){
       <td>${fmt(r.odds,2)}</td>
       <td>${pctStr(r.impliedProb)}</td>
       <td>${pctStr(r.ourProb)}</td>
-      <td class="${edgeCls}">+${fmt(r.edge*100,1)}pp</td>
+      <td class="${edgeCls}">${r.edge>=0?'+':''}${fmt(r.edge*100,1)}pp</td>
     </tr>`;
   }).join('');
-  document.getElementById('bestPlaysOut').innerHTML = `<div class="table-wrap"><table>
+  const belowBarNote = belowBar ? '<div class="small-muted" style="margin-bottom:6px">No edge in this game cleared the usual 5pp "standout" bar -- showing this game\'s best available edges instead.</div>' : '';
+  document.getElementById('bestPlaysOut').innerHTML = `${belowBarNote}<div class="table-wrap"><table>
     <thead><tr><th class="name-cell">Player</th><th>Game</th><th>Market</th><th>Opp Rk vPos</th><th>Our Proj</th><th>Odds</th><th>Implied%</th><th>Our Prob%</th><th>Edge</th></tr></thead>
     <tbody>${bodyRows}</tbody>
   </table></div>`;
@@ -1554,8 +1573,11 @@ function renderBestPlays(){
 // ---------- FULL LADDERS (every player, every line Sportsbet publishes -- the complete dataset) ----------
 const bettingGameSelect = document.getElementById('bettingGameSelect');
 const bettingMarketSelect = document.getElementById('bettingMarketSelect');
+const bestPlaysGameSelect = document.getElementById('bestPlaysGameSelect');
 function populateBettingGameSelect(){
-  bettingGameSelect.innerHTML = BETTING_SLATE.games.map((g,i)=>`<option value="${i}">${bettingMatchupLabel(g)}${g.live?' (live at scrape)':''}</option>`).join('');
+  const gameOptions = BETTING_SLATE.games.map((g,i)=>`<option value="${i}">${bettingMatchupLabel(g)}${g.live?' (live at scrape)':''}</option>`).join('');
+  bettingGameSelect.innerHTML = gameOptions;
+  bestPlaysGameSelect.innerHTML = `<option value="all">All Games (Best Plays Today)</option>` + gameOptions;
 }
 function renderBettingLadders(){
   const gameIdx = parseInt(bettingGameSelect.value);
@@ -1598,6 +1620,7 @@ function renderBettingLadders(){
 }
 bettingGameSelect.addEventListener('change', renderBettingLadders);
 bettingMarketSelect.addEventListener('change', renderBettingLadders);
+bestPlaysGameSelect.addEventListener('change', renderBestPlays);
 populateBettingGameSelect();
 renderBettingLadders();
 renderBestPlays();
